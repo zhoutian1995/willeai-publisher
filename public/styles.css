@@ -76,7 +76,8 @@ body::after {
 
 button,
 input,
-textarea {
+textarea,
+select {
   font: inherit;
 }
 
@@ -960,7 +961,8 @@ h2 {
 }
 
 input,
-textarea {
+textarea,
+select {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: var(--radius-control);
@@ -1002,6 +1004,7 @@ textarea::placeholder {
 
 input:focus,
 textarea:focus,
+select:focus,
 button:focus-visible {
   border-color: rgba(11, 127, 122, 0.78);
   box-shadow: 0 0 0 3px rgba(11, 127, 122, 0.12);
@@ -1238,6 +1241,73 @@ button:focus-visible {
 .media-url-field textarea {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
+}
+
+.platform-options-panel {
+  display: grid;
+  gap: 12px;
+  border: 1px solid rgba(189, 203, 201, 0.72);
+  border-radius: var(--radius-panel);
+  background: rgba(244, 247, 246, 0.88);
+  padding: 14px;
+}
+
+.platform-options-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.platform-options-head p,
+.option-note {
+  margin: 3px 0 0;
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.platform-option-list {
+  display: grid;
+  gap: 10px;
+}
+
+.platform-option-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: rgba(255, 255, 255, 0.92);
+  padding: 12px;
+}
+
+.option-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.option-title strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.option-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.option-empty {
+  min-height: 72px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed rgba(189, 203, 201, 0.8);
+  border-radius: var(--radius-control);
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
 }
 
 .aside-box {
@@ -1483,6 +1553,36 @@ button:focus-visible {
   color: var(--accent-dark);
 }
 
+.handoff-text,
+.handoff-actions,
+.handoff-link {
+  display: block;
+}
+
+.handoff-actions {
+  margin-top: 8px;
+}
+
+.handoff-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  border: 1px solid var(--accent-dark);
+  border-radius: var(--radius-control);
+  background: var(--accent-dark);
+  color: #ffffff !important;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.handoff-link {
+  margin-top: 6px;
+  color: var(--accent-dark);
+  overflow-wrap: anywhere;
+}
+
 .toast-region {
   position: fixed;
   right: 16px;
@@ -1605,6 +1705,7 @@ button:focus-visible {
   }
 
   .media-workspace-head,
+  .platform-options-head,
   .drop-zone,
   .media-item,
   .auth-qr-panel {
@@ -1620,7 +1721,16 @@ button:focus-visible {
     display: grid;
   }
 
+  .platform-options-head {
+    display: grid;
+  }
+
+  .option-grid {
+    grid-template-columns: 1fr;
+  }
+
   .drop-zone .secondary-button,
+  .platform-options-head .small-button,
   .media-actions,
   .media-action {
     width: 100%;

@@ -335,6 +335,111 @@ function normalizeAccounts(data) {
   return { total: 0, list: [] };
 }
 
+function asPlainObject(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+function parsePositiveInteger(value) {
+  if (typeof value === 'number' && Number.isInteger(value) && value > 0) {
+    return value;
+  }
+  if (typeof value === 'string' && /^\d+$/.test(value.trim())) {
+    const parsed = Number(value.trim());
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 0;
+  }
+  return 0;
+}
+
+function parseEnumNumber(value, allowed, fallback) {
+  const parsed = typeof value === 'number'
+    ? value
+    : typeof value === 'string' && value.trim() !== ''
+      ? Number(value.trim())
+      : fallback;
+  return allowed.includes(parsed) ? parsed : fallback;
+}
+
+function cleanOptionText(value, maxLength = 500) {
+  return typeof value === 'string' ? value.trim().slice(0, maxLength) : '';
+}
+
+function buildPlatformOption(platform, rawOption, errors) {
+  const raw = asPlainObject(rawOption);
+  if (platform === 'bilibili') {
+    const tid = parsePositiveInteger(raw.tid) || 21;
+    const copyright = parseEnumNumber(raw.copyright, [1, 2], 1);
+    const source = cleanOptionText(raw.source, 200);
+    const option = {
+      tid,
+      copyright,
+      no_reprint: parseEnumNumber(raw.no_reprint, [0, 1], 1),
+    };
+    if (copyright === 2) {
+      if (!source) {
+        errors.push('Bilibili 转载发布需要填写转载来源');
+      }
+      else {
+        option.source = source;
+      }
+    }
+    return option;
+  }
+
+  if (platform === 'douyin') {
+    const option = {
+      private_status: parseEnumNumber(raw.private_status, [0, 1, 2], 0),
+      download_type: parseEnumNumber(raw.download_type, [1, 2], 1),
+    };
+    const shortTitle = cleanOptionText(raw.short_title, 12);
+    if (shortTitle) {
+      option.short_title = shortTitle;
+    }
+    return option;
+  }
+
+  if (platform === 'wxSph') {
+    const workId = cleanOptionText(raw.workId, 200);
+    const workLink = cleanOptionText(raw.workLink, 500);
+    if (!workId && !workLink) {
+      errors.push('微信视频号需要先通过插件生成作品 ID 或填写作品链接');
+      return undefined;
+    }
+    return {
+      ...(workId ? { workId } : {}),
+      ...(workLink ? { workLink } : {}),
+      ...(raw.linkStatus === 'pending' || raw.linkStatus === 'ready' || raw.linkStatus === 'failed'
+        ? { linkStatus: raw.linkStatus }
+        : workId && !workLink
+          ? { linkStatus: 'pending' }
+          : {}),
+    };
+  }
+
+  if (platform === 'xhs') {
+    const workLink = cleanOptionText(raw.workLink, 500);
+    if (!workLink) {
+      errors.push('小红书当前需要填写已发布作品链接');
+      return undefined;
+    }
+    return { workLink };
+  }
+
+  if (platform === 'KWAI') {
+    const option = {};
+    const stereoType = cleanOptionText(raw.stereo_type, 100);
+    const merchantProductId = cleanOptionText(raw.merchant_product_id, 100);
+    if (stereoType) {
+      option.stereo_type = stereoType;
+    }
+    if (merchantProductId) {
+      option.merchant_product_id = merchantProductId;
+    }
+    return Object.keys(option).length > 0 ? option : undefined;
+  }
+
+  return undefined;
+}
+
 function validatePublishPayload(body) {
   const errors = [];
   const title = typeof body.title === 'string' ? body.title.trim() : '';
@@ -348,6 +453,7 @@ function validatePublishPayload(body) {
     ? body.accountIds.map(value => String(value || '').trim()).filter(Boolean)
     : [];
   const accounts = Array.isArray(body.accounts) ? body.accounts : [];
+  const platformOptions = asPlainObject(body.platformOptions);
 
   if (!title && !bodyText) {
     errors.push('标题和正文至少填写一项');
@@ -383,7 +489,8 @@ function validatePublishPayload(body) {
       errors.push(`找不到账号对应平台：${accountId}`);
       return null;
     }
-    return { accountId, platform };
+    const option = buildPlatformOption(platform, platformOptions[platform], errors);
+    return option ? { accountId, platform, option } : { accountId, platform };
   }).filter(Boolean);
 
   const publishAt = body.publishAt ? new Date(body.publishAt) : new Date();
@@ -474,6 +581,19 @@ async function handleApi(req, res, url) {
     if (url.pathname === '/api/accounts' && req.method === 'GET') {
       const result = await upstream(req, '/v2/channels/accounts');
       ok(res, normalizeAccounts(result.data));
+      return;
+    }
+
+    const publishOptionValuesMatch = url.pathname.match(/^\/api\/accounts\/([^/]+)\/publish-options\/([^/]+)\/values$/);
+    if (publishOptionValuesMatch && req.method === 'GET') {
+      const accountId = decodeURIComponent(publishOptionValuesMatch[1]);
+      const field = decodeURIComponent(publishOptionValuesMatch[2]);
+      if (!accountId || !/^[A-Za-z0-9_-]+$/.test(field)) {
+        fail(res, 400, '发布选项参数无效');
+        return;
+      }
+      const result = await upstream(req, `/v2/channels/accounts/${encodeURIComponent(accountId)}/publish-options/${encodeURIComponent(field)}/values`);
+      ok(res, result.data);
       return;
     }
 
@@ -594,6 +714,14 @@ async function handleApi(req, res, url) {
     if (flowMatch && req.method === 'GET') {
       const flowId = decodeURIComponent(flowMatch[1]);
       const result = await upstream(req, `/v2/channels/publish/flows/${encodeURIComponent(flowId)}`);
+      ok(res, result.data);
+      return;
+    }
+
+    const userActionMatch = url.pathname.match(/^\/api\/publish-records\/([^/]+)\/user-action$/);
+    if (userActionMatch && req.method === 'GET') {
+      const recordId = decodeURIComponent(userActionMatch[1]);
+      const result = await upstream(req, `/v2/channels/publish/records/${encodeURIComponent(recordId)}/user-action`);
       ok(res, result.data);
       return;
     }

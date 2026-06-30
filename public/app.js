@@ -22,6 +22,35 @@ const state = {
   accounts: [],
   selectedAccountIds: new Set(),
   authSessions: new Map(),
+  platformOptions: {
+    bilibili: {
+      tid: '21',
+      copyright: '1',
+      no_reprint: '1',
+      source: '',
+    },
+    douyin: {
+      private_status: '0',
+      download_type: '1',
+      short_title: '',
+    },
+    wxSph: {
+      workId: '',
+      workLink: '',
+    },
+    xhs: {
+      workLink: '',
+    },
+    KWAI: {
+      stereo_type: '',
+      merchant_product_id: '',
+    },
+  },
+  optionValues: {
+    bilibiliTid: null,
+  },
+  userActions: new Map(),
+  userActionLoading: new Set(),
   mediaItems: [],
   mediaMode: 'video',
   nextMediaId: 1,
@@ -38,6 +67,7 @@ const els = {
   publishForm: document.querySelector('#publishForm'),
   publishButton: document.querySelector('#publishButton'),
   clearButton: document.querySelector('#clearButton'),
+  reloadOptionsButton: document.querySelector('#reloadOptionsButton'),
   titleInput: document.querySelector('#titleInput'),
   bodyInput: document.querySelector('#bodyInput'),
   mediaInput: document.querySelector('#mediaInput'),
@@ -52,6 +82,7 @@ const els = {
   coverInput: document.querySelector('#coverInput'),
   publishAtInput: document.querySelector('#publishAtInput'),
   preflightList: document.querySelector('#preflightList'),
+  platformOptionsList: document.querySelector('#platformOptionsList'),
   flowBox: document.querySelector('#flowBox'),
   flowMeta: document.querySelector('#flowMeta'),
   toastRegion: document.querySelector('#toastRegion'),
@@ -184,6 +215,14 @@ function localizedText(value) {
     return value;
   }
   return value['zh-CN'] || value['en-US'] || '';
+}
+
+function getSelectedAccounts() {
+  return state.accounts.filter(account => state.selectedAccountIds.has(account.id));
+}
+
+function getSelectedPlatformIds() {
+  return [...new Set(getSelectedAccounts().map(account => account.type))];
 }
 
 function isDataImageUrl(value) {
@@ -415,6 +454,224 @@ function renderAuthSession(platformId) {
     `;
   }
   return `<p class="account-note">${escapeHtml(session.message || '授权窗口已打开，完成后这里会自动更新。')}</p>`;
+}
+
+function flattenOptionItems(items, level = 0) {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+  return items.flatMap((item) => {
+    const current = item.disabled
+      ? []
+      : [{
+          value: String(item.value ?? ''),
+          label: `${'　'.repeat(level)}${item.label || item.value}`,
+          description: item.description || '',
+        }];
+    return [...current, ...flattenOptionItems(item.children, level + 1)];
+  });
+}
+
+function renderSelectOptions(items, selectedValue) {
+  return items.map(item => `
+    <option value="${escapeHtml(item.value)}" ${String(selectedValue) === String(item.value) ? 'selected' : ''}>
+      ${escapeHtml(item.label)}
+    </option>
+  `).join('');
+}
+
+function updatePlatformOption(platform, field, value, rerender = true) {
+  if (!state.platformOptions[platform]) {
+    state.platformOptions[platform] = {};
+  }
+  state.platformOptions[platform][field] = value;
+  if (rerender) {
+    renderPlatformOptions();
+  }
+  buildPreflight();
+}
+
+function renderPlatformOptions() {
+  const selectedPlatformIds = getSelectedPlatformIds();
+  if (selectedPlatformIds.length === 0) {
+    els.platformOptionsList.innerHTML = '<p class="option-empty">选择账号后显示对应平台配置。</p>';
+    return;
+  }
+
+  els.platformOptionsList.innerHTML = selectedPlatformIds.map((platformId) => {
+    if (platformId === 'bilibili') {
+      return renderBilibiliOptions();
+    }
+    if (platformId === 'douyin') {
+      return renderDouyinOptions();
+    }
+    if (platformId === 'KWAI') {
+      return renderKwaiOptions();
+    }
+    if (platformId === 'wxSph') {
+      return renderWorkLinkOptions('wxSph', '微信视频号', '填写插件返回的作品 ID 或作品链接后，可把该作品纳入任务流。');
+    }
+    if (platformId === 'xhs') {
+      return renderWorkLinkOptions('xhs', '小红书', '上游当前要求提供已完成的小红书作品链接，暂不支持从这里直接上传发布。');
+    }
+    return `
+      <article class="platform-option-card">
+        <div class="option-title">
+          <strong>${escapeHtml(platformNames.get(platformId) || platformId)}</strong>
+          <span class="mini-pill is-warn">使用默认配置</span>
+        </div>
+      </article>
+    `;
+  }).join('');
+}
+
+function renderBilibiliOptions() {
+  const option = state.platformOptions.bilibili;
+  const tidItems = flattenOptionItems(state.optionValues.bilibiliTid?.items);
+  const tidOptions = tidItems.length > 0
+    ? renderSelectOptions(tidItems, option.tid)
+    : '<option value="21">日常</option>';
+  return `
+    <article class="platform-option-card">
+      <div class="option-title">
+        <strong>Bilibili</strong>
+        <span class="mini-pill is-ok">可自动提交</span>
+      </div>
+      <div class="option-grid">
+        <label class="field">
+          <span>分区</span>
+          <select data-option-platform="bilibili" data-option-field="tid">${tidOptions}</select>
+        </label>
+        <label class="field">
+          <span>类型</span>
+          <select data-option-platform="bilibili" data-option-field="copyright">
+            <option value="1" ${option.copyright === '1' ? 'selected' : ''}>原创</option>
+            <option value="2" ${option.copyright === '2' ? 'selected' : ''}>转载</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>转载设置</span>
+          <select data-option-platform="bilibili" data-option-field="no_reprint">
+            <option value="1" ${option.no_reprint === '1' ? 'selected' : ''}>禁止转载</option>
+            <option value="0" ${option.no_reprint === '0' ? 'selected' : ''}>允许转载</option>
+          </select>
+        </label>
+      </div>
+      ${option.copyright === '2' ? `
+        <label class="field">
+          <span>转载来源</span>
+          <input type="text" value="${escapeHtml(option.source)}" data-option-platform="bilibili" data-option-field="source" placeholder="填写原视频来源" />
+        </label>
+      ` : ''}
+    </article>
+  `;
+}
+
+function renderDouyinOptions() {
+  const option = state.platformOptions.douyin;
+  return `
+    <article class="platform-option-card">
+      <div class="option-title">
+        <strong>抖音</strong>
+        <span class="mini-pill is-warn">需手机确认</span>
+      </div>
+      <div class="option-grid">
+        <label class="field">
+          <span>可见范围</span>
+          <select data-option-platform="douyin" data-option-field="private_status">
+            <option value="0" ${option.private_status === '0' ? 'selected' : ''}>公开</option>
+            <option value="1" ${option.private_status === '1' ? 'selected' : ''}>私密</option>
+            <option value="2" ${option.private_status === '2' ? 'selected' : ''}>好友可见</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>下载权限</span>
+          <select data-option-platform="douyin" data-option-field="download_type">
+            <option value="1" ${option.download_type === '1' ? 'selected' : ''}>允许下载</option>
+            <option value="2" ${option.download_type === '2' ? 'selected' : ''}>不允许下载</option>
+          </select>
+        </label>
+      </div>
+      <label class="field">
+        <span>短标题</span>
+        <input type="text" maxlength="12" value="${escapeHtml(option.short_title)}" data-option-platform="douyin" data-option-field="short_title" placeholder="选填，最多 12 字" />
+      </label>
+      <p class="option-note">提交后会生成抖音发布入口，扫码或打开短链后在抖音完成最后确认。</p>
+    </article>
+  `;
+}
+
+function renderKwaiOptions() {
+  const option = state.platformOptions.KWAI;
+  return `
+    <article class="platform-option-card">
+      <div class="option-title">
+        <strong>快手</strong>
+        <span class="mini-pill is-ok">可自动轮询</span>
+      </div>
+      <div class="option-grid">
+        <label class="field">
+          <span>视频类型</span>
+          <input type="text" value="${escapeHtml(option.stereo_type)}" data-option-platform="KWAI" data-option-field="stereo_type" placeholder="选填" />
+        </label>
+        <label class="field">
+          <span>商品 ID</span>
+          <input type="text" value="${escapeHtml(option.merchant_product_id)}" data-option-platform="KWAI" data-option-field="merchant_product_id" placeholder="选填" />
+        </label>
+      </div>
+    </article>
+  `;
+}
+
+function renderWorkLinkOptions(platformId, title, note) {
+  const option = state.platformOptions[platformId] || {};
+  return `
+    <article class="platform-option-card">
+      <div class="option-title">
+        <strong>${escapeHtml(title)}</strong>
+        <span class="mini-pill is-warn">需外部作品</span>
+      </div>
+      ${platformId === 'wxSph' ? `
+        <label class="field">
+          <span>作品 ID</span>
+          <input type="text" value="${escapeHtml(option.workId || '')}" data-option-platform="${escapeHtml(platformId)}" data-option-field="workId" placeholder="插件返回的作品锚点 ID" />
+        </label>
+      ` : ''}
+      <label class="field">
+        <span>作品链接</span>
+        <input type="url" value="${escapeHtml(option.workLink || '')}" data-option-platform="${escapeHtml(platformId)}" data-option-field="workLink" placeholder="粘贴平台作品链接" />
+      </label>
+      <p class="option-note">${escapeHtml(note)}</p>
+    </article>
+  `;
+}
+
+async function loadBilibiliOptions(force = false) {
+  if (state.optionValues.bilibiliTid && !force) {
+    return;
+  }
+  const account = getSelectedAccounts().find(item => item.type === 'bilibili');
+  if (!account) {
+    return;
+  }
+  try {
+    const result = await api(`/api/accounts/${encodeURIComponent(account.id)}/publish-options/tid/values`);
+    state.optionValues.bilibiliTid = result;
+    const items = flattenOptionItems(result?.items);
+    if (items.length > 0 && !items.some(item => item.value === state.platformOptions.bilibili.tid)) {
+      state.platformOptions.bilibili.tid = items[0].value;
+    }
+    renderPlatformOptions();
+  }
+  catch (error) {
+    showToast(`Bilibili 分区加载失败：${error.message}`, 'warn');
+  }
+}
+
+function maybeLoadSelectedPlatformOptions(force = false) {
+  if (getSelectedPlatformIds().includes('bilibili')) {
+    loadBilibiliOptions(force);
+  }
 }
 
 function getMediaUrls() {
@@ -668,7 +925,8 @@ function clearMediaItems() {
 }
 
 function buildPreflight() {
-  const selectedAccounts = state.accounts.filter(account => state.selectedAccountIds.has(account.id));
+  const selectedAccounts = getSelectedAccounts();
+  const selectedPlatforms = new Set(selectedAccounts.map(account => account.type));
   const mediaUrls = getMediaUrls();
   const title = els.titleInput.value.trim();
   const body = els.bodyInput.value.trim();
@@ -727,12 +985,46 @@ function buildPreflight() {
     }
   }
 
-  const xhsSelected = selectedAccounts.some(account => account.type === 'xhs');
-  if (xhsSelected) {
+  if (selectedPlatforms.has('bilibili') && !state.platformOptions.bilibili.tid) {
     checks.push({
       ok: false,
+      text: 'Bilibili 需要选择发布分区',
+    });
+    issues.push('Bilibili 需要选择发布分区');
+  }
+
+  if (selectedPlatforms.has('bilibili') && state.platformOptions.bilibili.copyright === '2' && !state.platformOptions.bilibili.source.trim()) {
+    checks.push({
+      ok: false,
+      text: 'Bilibili 转载发布需要填写来源',
+    });
+    issues.push('Bilibili 转载发布需要填写来源');
+  }
+
+  if (selectedPlatforms.has('wxSph')) {
+    const wxOption = state.platformOptions.wxSph;
+    if (!wxOption.workId.trim() && !wxOption.workLink.trim()) {
+      checks.push({
+        ok: false,
+        text: '微信视频号需要先填写插件作品 ID 或作品链接',
+      });
+      issues.push('微信视频号需要先填写插件作品 ID 或作品链接');
+    }
+  }
+
+  if (selectedPlatforms.has('xhs') && !state.platformOptions.xhs.workLink.trim()) {
+    checks.push({
+      ok: false,
+      text: '小红书当前需要填写已完成作品链接',
+    });
+    issues.push('小红书当前需要填写已完成作品链接');
+  }
+
+  if (selectedPlatforms.has('douyin')) {
+    checks.push({
+      ok: true,
       warn: true,
-      text: '小红书目标已选择，发布后请单独复核结果',
+      text: '抖音会生成确认入口，需在手机上完成最后一步',
     });
   }
 
@@ -880,6 +1172,7 @@ function renderFlow(flow) {
       ${tasks.length > 0 ? tasks.map(renderTask).join('') : '<p class="empty-state">上游暂未返回任务列表。</p>'}
     </div>
   `;
+  loadUserActionsForTasks(tasks);
   updateOverview();
 }
 
@@ -888,15 +1181,7 @@ function renderTask(task) {
   const platformName = platformNames.get(task.platform) || task.platform || account?.type || '未知平台';
   const status = normalizeTaskStatus(task.status);
   const tone = status.tone;
-  const detail = task.errorMsg
-    ? `错误：${task.errorMsg}`
-    : task.workLink
-      ? `作品链接：<a href="${escapeHtml(task.workLink)}" target="_blank" rel="noreferrer">${escapeHtml(task.workLink)}</a>`
-      : task.platformWorkId
-        ? `平台作品 ID：${escapeHtml(task.platformWorkId)}`
-        : task.publishTime
-          ? `计划时间：${escapeHtml(task.publishTime)}`
-          : '等待平台返回结果';
+  const detail = renderTaskDetail(task);
 
   return `
     <article class="task-row">
@@ -907,6 +1192,46 @@ function renderTask(task) {
       <p class="task-detail">${detail}</p>
     </article>
   `;
+}
+
+function isWaitingUserAction(task) {
+  const value = String(task?.status ?? '').toLowerCase();
+  return ['8', 'waiting_user_action', 'waitingforuseraction'].includes(value);
+}
+
+function renderTaskDetail(task) {
+  if (task.errorMsg) {
+    return `错误：${escapeHtml(task.errorMsg)}`;
+  }
+  if (task.workLink) {
+    return `作品链接：<a href="${escapeHtml(task.workLink)}" target="_blank" rel="noreferrer">${escapeHtml(task.workLink)}</a>`;
+  }
+  if (isWaitingUserAction(task) && task.platform === 'douyin') {
+    const action = state.userActions.get(task.id);
+    if (action?.shortLink) {
+      return `
+        <span class="handoff-text">内容已准备好，请在抖音完成最后确认。</span>
+        <span class="handoff-actions">
+          <a class="handoff-button" href="${escapeHtml(action.shortLink)}" target="_blank" rel="noreferrer">打开发布入口</a>
+          <span class="handoff-link">${escapeHtml(action.shortLink)}</span>
+        </span>
+      `;
+    }
+    if (action?.error) {
+      return `抖音确认入口获取失败：${escapeHtml(action.error)}`;
+    }
+    if (state.userActionLoading.has(task.id)) {
+      return '正在获取抖音确认入口...';
+    }
+    return '等待获取抖音确认入口';
+  }
+  if (task.platformWorkId) {
+    return `平台作品 ID：${escapeHtml(task.platformWorkId)}`;
+  }
+  if (task.publishTime) {
+    return `计划时间：${escapeHtml(task.publishTime)}`;
+  }
+  return '等待平台返回结果';
 }
 
 function normalizeTaskStatus(status) {
@@ -927,6 +1252,41 @@ function normalizeTaskStatus(status) {
     return { label: '处理中', tone: 'warn' };
   }
   return { label: `状态 ${status}`, tone: 'warn' };
+}
+
+function loadUserActionsForTasks(tasks) {
+  for (const task of tasks) {
+    if (task.platform !== 'douyin' || !isWaitingUserAction(task) || !task.id) {
+      continue;
+    }
+    if (state.userActions.has(task.id) || state.userActionLoading.has(task.id)) {
+      continue;
+    }
+    loadUserAction(task.id);
+  }
+}
+
+async function loadUserAction(recordId) {
+  state.userActionLoading.add(recordId);
+  try {
+    const result = await api(`/api/publish-records/${encodeURIComponent(recordId)}/user-action`);
+    state.userActions.set(recordId, result);
+  }
+  catch (error) {
+    state.userActions.set(recordId, { error: error.message });
+  }
+  finally {
+    state.userActionLoading.delete(recordId);
+    if (state.activeFlowId) {
+      try {
+        const flow = await api(`/api/flows/${encodeURIComponent(state.activeFlowId)}`);
+        renderFlow(flow);
+      }
+      catch {
+        renderFlow({ flowId: state.activeFlowId, tasks: [] });
+      }
+    }
+  }
 }
 
 async function loadAll() {
@@ -953,6 +1313,8 @@ async function loadAll() {
     pruneSelectedAccounts();
     setStatus('API 已连接', 'ok');
     renderPlatformGrid();
+    renderPlatformOptions();
+    maybeLoadSelectedPlatformOptions();
     buildPreflight();
   }
   catch (error) {
@@ -1141,6 +1503,8 @@ async function refreshAccountsSoon() {
       state.accounts = Array.isArray(accounts.list) ? accounts.list : [];
       pruneSelectedAccounts();
       renderPlatformGrid();
+      renderPlatformOptions();
+      maybeLoadSelectedPlatformOptions();
       buildPreflight();
     }
     catch (error) {
@@ -1168,6 +1532,7 @@ async function submitPublish(event) {
       publishAt: els.publishAtInput.value ? new Date(els.publishAtInput.value).toISOString() : new Date().toISOString(),
       accountIds: [...state.selectedAccountIds],
       accounts: state.accounts,
+      platformOptions: state.platformOptions,
     };
     const flow = await api('/api/publish', {
       method: 'POST',
@@ -1220,8 +1585,11 @@ function clearForm() {
   clearMediaItems();
   els.coverInput.value = '';
   state.selectedAccountIds.clear();
+  state.userActions.clear();
+  state.userActionLoading.clear();
   setDefaultPublishTime();
   renderPlatformGrid();
+  renderPlatformOptions();
   buildPreflight();
   renderFlow(null);
 }
@@ -1231,6 +1599,10 @@ function bindEvents() {
   els.publishForm.addEventListener('submit', submitPublish);
   els.clearButton.addEventListener('click', clearForm);
   els.clearMediaButton.addEventListener('click', clearMediaItems);
+  els.reloadOptionsButton.addEventListener('click', () => {
+    maybeLoadSelectedPlatformOptions(true);
+    showToast('平台选项已刷新。');
+  });
   els.chooseFileButton.addEventListener('click', () => els.fileInput.click());
   els.dropZone.addEventListener('click', (event) => {
     if (event.target.closest('button')) {
@@ -1319,8 +1691,26 @@ function bindEvents() {
         state.selectedAccountIds.delete(target.value);
       }
       renderPlatformGrid();
+      renderPlatformOptions();
+      maybeLoadSelectedPlatformOptions();
       buildPreflight();
     }
+  });
+
+  els.platformOptionsList.addEventListener('change', (event) => {
+    const target = event.target;
+    if (!target.dataset.optionPlatform || !target.dataset.optionField) {
+      return;
+    }
+    updatePlatformOption(target.dataset.optionPlatform, target.dataset.optionField, target.value);
+  });
+
+  els.platformOptionsList.addEventListener('input', (event) => {
+    const target = event.target;
+    if (!target.dataset.optionPlatform || !target.dataset.optionField) {
+      return;
+    }
+    updatePlatformOption(target.dataset.optionPlatform, target.dataset.optionField, target.value, false);
   });
 
   window.addEventListener('message', (event) => {
@@ -1338,6 +1728,7 @@ function bindEvents() {
 setDefaultPublishTime();
 updateMediaModeUi();
 renderMediaQueue();
+renderPlatformOptions();
 bindEvents();
 setActiveView('overview');
 buildPreflight();

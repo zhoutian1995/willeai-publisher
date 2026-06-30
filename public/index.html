@@ -6,7 +6,7 @@
     <title>WilleAI Publish Studio</title>
     <meta name="description" content="WilleAI 跨平台内容发布工作台" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=20260630-avatar1" />
+    <link rel="stylesheet" href="/styles.css?v=20260630-publish1" />
   </head>
   <body>
     <a class="skip-link" href="#overviewTitle">跳到工作区</a>
@@ -166,6 +166,20 @@
                     <input id="publishAtInput" type="datetime-local" />
                   </label>
                 </div>
+
+                <section class="platform-options-panel" aria-labelledby="platformOptionsTitle">
+                  <div class="platform-options-head">
+                    <div>
+                      <span id="platformOptionsTitle" class="field-title">平台发布配置</span>
+                      <p>为支持自动发布的平台补齐必填项；需要人工确认的平台会在结果区给出入口。</p>
+                    </div>
+                    <button class="small-button" id="reloadOptionsButton" type="button">刷新选项</button>
+                  </div>
+
+                  <div class="platform-option-list" id="platformOptionsList">
+                    <p class="option-empty">选择账号后显示对应平台配置。</p>
+                  </div>
+                </section>
               </div>
             </section>
 
@@ -231,6 +245,6 @@
     </div>
 
     <div class="toast-region" id="toastRegion" aria-live="polite"></div>
-    <script src="/app.js?v=20260630-avatar1" type="module"></script>
+    <script src="/app.js?v=20260630-publish1" type="module"></script>
   </body>
 </html>
