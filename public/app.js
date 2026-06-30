@@ -46,6 +46,14 @@ const els = {
   flowBox: document.querySelector('#flowBox'),
   flowMeta: document.querySelector('#flowMeta'),
   toastRegion: document.querySelector('#toastRegion'),
+  connectedMetric: document.querySelector('#connectedMetric'),
+  selectedMetric: document.querySelector('#selectedMetric'),
+  mediaMetric: document.querySelector('#mediaMetric'),
+  preflightMetric: document.querySelector('#preflightMetric'),
+  pipelineStepAccounts: document.querySelector('#pipelineStepAccounts'),
+  pipelineStepContent: document.querySelector('#pipelineStepContent'),
+  pipelineStepPreflight: document.querySelector('#pipelineStepPreflight'),
+  pipelineStepSubmit: document.querySelector('#pipelineStepSubmit'),
 };
 
 function escapeHtml(value) {
@@ -326,16 +334,64 @@ function buildPreflight() {
     </div>
   `).join('');
 
+  updateOverview({ issues, selectedAccounts, mediaUrls });
   return { issues, selectedAccounts, mediaUrls };
+}
+
+function updateOverview(preflight) {
+  const selectedAccounts = preflight?.selectedAccounts
+    || state.accounts.filter(account => state.selectedAccountIds.has(account.id));
+  const mediaUrls = preflight?.mediaUrls || getMediaUrls();
+  const normalCount = state.accounts.filter(account => getAccountStatus(account) === 'normal').length;
+  const hasContent = els.titleInput.value.trim().length > 0 || els.bodyInput.value.trim().length > 0;
+  const hasAccounts = selectedAccounts.length > 0;
+  const hasMedia = mediaUrls.length > 0;
+  const issues = Array.isArray(preflight?.issues) ? preflight.issues : [];
+  const isReady = issues.length === 0 && hasAccounts && hasContent && hasMedia;
+
+  if (els.connectedMetric) {
+    els.connectedMetric.textContent = String(normalCount);
+  }
+  if (els.selectedMetric) {
+    els.selectedMetric.textContent = String(selectedAccounts.length);
+  }
+  if (els.mediaMetric) {
+    els.mediaMetric.textContent = String(mediaUrls.length);
+  }
+  if (els.preflightMetric) {
+    els.preflightMetric.textContent = isReady ? '可发布' : issues.length > 0 ? '待修正' : '待填写';
+    els.preflightMetric.closest('.metric-tile')?.classList.toggle('is-ok', isReady);
+    els.preflightMetric.closest('.metric-tile')?.classList.toggle('is-warn', !isReady && issues.length > 0);
+    els.preflightMetric.closest('.metric-tile')?.classList.toggle('is-danger', false);
+  }
+
+  const steps = [
+    [els.pipelineStepAccounts, hasAccounts],
+    [els.pipelineStepContent, hasContent],
+    [els.pipelineStepPreflight, isReady],
+    [els.pipelineStepSubmit, Boolean(state.activeFlowId)],
+  ];
+  const activeIndex = steps.findIndex(([, complete]) => !complete);
+  for (const [element, complete] of steps) {
+    if (!element) {
+      continue;
+    }
+    const index = steps.findIndex(([stepElement]) => stepElement === element);
+    element.classList.toggle('is-complete', complete);
+    element.classList.toggle('is-active', index === activeIndex);
+  }
 }
 
 function renderFlow(flow) {
   if (!flow || !flow.flowId) {
+    state.activeFlowId = '';
     els.flowMeta.textContent = '未提交';
     els.flowBox.innerHTML = '<p class="empty-state">选择账号并填写 HTTPS 素材 URL 后，预检和发布结果会显示在这里。</p>';
+    updateOverview();
     return;
   }
 
+  state.activeFlowId = flow.flowId;
   els.flowMeta.textContent = '已提交';
   const tasks = Array.isArray(flow.tasks) ? flow.tasks : [];
   els.flowBox.innerHTML = `
@@ -347,6 +403,7 @@ function renderFlow(flow) {
       ${tasks.length > 0 ? tasks.map(renderTask).join('') : '<p class="empty-state">上游暂未返回任务列表。</p>'}
     </div>
   `;
+  updateOverview();
 }
 
 function renderTask(task) {
