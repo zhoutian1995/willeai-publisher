@@ -135,8 +135,86 @@ function setStatus(text, tone = 'warn') {
 }
 
 function getPlatformName(platform) {
+  if (typeof platform === 'string') {
+    return platformNames.get(platform) || platform;
+  }
   const displayName = platform.displayName || {};
   return displayName['zh-CN'] || displayName['en-US'] || platformNames.get(platform.platform) || platform.platform;
+}
+
+function getPlatformDefinition(platformId) {
+  return state.platforms.find(platform => platform.platform === platformId) || { platform: platformId };
+}
+
+function localizedText(value) {
+  if (!value) {
+    return '';
+  }
+  if (typeof value === 'string') {
+    return value;
+  }
+  return value['zh-CN'] || value['en-US'] || '';
+}
+
+function isDataImageUrl(value) {
+  return /^data:image\//i.test(String(value || '').trim());
+}
+
+function platformCanAuth(platform) {
+  return platform?.capabilities?.auth?.supported === true;
+}
+
+function platformCanPublish(platform) {
+  return platform?.capabilities?.publish?.supported === true;
+}
+
+function authUnavailableText(platform) {
+  if (platform.platform === 'xhs') {
+    return '小红书当前支持作品发布链路，但上游暂未开放账号连接授权。';
+  }
+  if (platform.authType === 'plugin') {
+    return '该平台账号由插件或后台接入，当前不在这里发起授权。';
+  }
+  if (platform.status !== 'available') {
+    return '该平台当前未开放连接。';
+  }
+  return '该平台暂未开放账号连接。';
+}
+
+function renderConnectAction(platform, accounts) {
+  const actionText = accounts.length > 0 ? '重新连接' : '连接账号';
+  const canAuth = platformCanAuth(platform);
+  const icon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.1 0l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1"/><path d="M14 11a5 5 0 0 0-7.1 0l-2 2a5 5 0 0 0 7.1 7.1l1.1-1.1"/></svg>';
+  if (canAuth) {
+    return `
+      <button class="connect-button" type="button" data-action="connect" data-platform="${escapeHtml(platform.platform)}">
+        ${icon}
+        ${escapeHtml(actionText)}
+      </button>
+    `;
+  }
+  return `
+    <button class="connect-button is-disabled" type="button" disabled title="${escapeHtml(authUnavailableText(platform))}">
+      ${icon}
+      暂未开放连接
+    </button>
+  `;
+}
+
+function formatAuthExpiry(value) {
+  if (!value) {
+    return '';
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
 }
 
 function accountName(account) {
@@ -204,15 +282,14 @@ function renderPlatformGrid() {
     const connected = accounts.filter(account => getAccountStatus(account) === 'normal');
     const abnormal = accounts.length - connected.length;
     const isSelected = connected.some(account => state.selectedAccountIds.has(account.id));
-    const isRednote = platform.platform === 'xhs';
     const statusTone = connected.length > 0 ? 'ok' : abnormal > 0 ? 'warn' : 'danger';
     const statusText = connected.length > 0
       ? `${connected.length} 个已连接`
       : abnormal > 0
         ? '需重新授权'
         : '未连接';
-    const canPublish = platform.capabilities?.publish && Object.values(platform.capabilities.publish).some(Boolean);
-    const actionText = accounts.length > 0 ? '重新连接' : '连接账号';
+    const canAuth = platformCanAuth(platform);
+    const canPublish = platformCanPublish(platform);
 
     return `
       <article class="platform-row${isSelected ? ' is-selected' : ''}" data-platform="${escapeHtml(platform.platform)}">
@@ -223,14 +300,11 @@ function renderPlatformGrid() {
             <span class="mini-pill is-${statusTone}">${escapeHtml(statusText)}</span>
           </div>
           <div class="platform-actions">
-            <button class="connect-button" type="button" data-action="connect" data-platform="${escapeHtml(platform.platform)}">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.1 0l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1"/><path d="M14 11a5 5 0 0 0-7.1 0l-2 2a5 5 0 0 0 7.1 7.1l1.1-1.1"/></svg>
-              ${escapeHtml(actionText)}
-            </button>
+            ${renderConnectAction(platform, accounts)}
             ${canPublish ? '<span class="mini-pill is-ok">支持发布</span>' : '<span class="mini-pill is-warn">发布能力待确认</span>'}
-            ${isRednote ? '<span class="mini-pill is-warn">需单独验证</span>' : ''}
+            ${canAuth ? '<span class="mini-pill is-ok">支持连接</span>' : '<span class="mini-pill is-warn">不可在此连接</span>'}
           </div>
-          ${renderAccountList(platform.platform, connected, abnormal)}
+          ${renderAccountList(platform, connected, abnormal)}
           ${renderAuthSession(platform.platform)}
         </div>
       </article>
@@ -238,8 +312,12 @@ function renderPlatformGrid() {
   }).join('');
 }
 
-function renderAccountList(platformId, connected, abnormalCount) {
+function renderAccountList(platform, connected, abnormalCount) {
+  const platformId = platform.platform;
   if (connected.length === 0) {
+    if (!platformCanAuth(platform)) {
+      return `<p class="account-note">${escapeHtml(authUnavailableText(platform))}</p>`;
+    }
     return `<p class="account-note">${abnormalCount > 0 ? '账号状态异常，请重新连接。' : '连接账号后即可在这里选择发布目标。'}</p>`;
   }
 
@@ -267,8 +345,8 @@ function renderAuthSession(platformId) {
   if (session.status === 'completed') {
     return '<p class="account-note">授权完成，正在刷新账号列表。</p>';
   }
-  if (session.status === 'failed') {
-    return '<p class="account-note">授权失败，请重新发起连接。</p>';
+  if (session.status === 'failed' || session.status === 'expired') {
+    return `<p class="account-note">${escapeHtml(session.message || '授权未完成，请重新发起连接。')}</p>`;
   }
   if (session.requiresSelection && Array.isArray(session.selectableAccounts) && session.selectableAccounts.length > 0) {
     return `
@@ -286,6 +364,21 @@ function renderAuthSession(platformId) {
         <button class="small-button" type="button" data-action="submit-auth-selection" data-platform="${escapeHtml(platformId)}">
           确认连接所选账号
         </button>
+      </div>
+    `;
+  }
+  if (session.qrCodeUrl) {
+    const platform = getPlatformDefinition(platformId);
+    const instruction = localizedText(session.authInstructions) || localizedText(platform.authInstructions) || '请扫码并按平台提示完成授权。';
+    const expiresAt = formatAuthExpiry(session.expiresAt);
+    return `
+      <div class="auth-qr-panel">
+        <img class="auth-qr-image" src="${escapeHtml(session.qrCodeUrl)}" alt="${escapeHtml(getPlatformName(platform))} 授权二维码" />
+        <div class="auth-qr-copy">
+          <span class="auth-qr-title">${escapeHtml(getPlatformName(platform))}扫码连接</span>
+          <span>${escapeHtml(instruction)}</span>
+          ${expiresAt ? `<span class="auth-qr-meta">有效期至 ${escapeHtml(expiresAt)}</span>` : ''}
+        </div>
       </div>
     `;
   }
@@ -854,31 +947,63 @@ function setLoading(isLoading) {
 }
 
 async function startAuth(platform) {
-  const popup = window.open('about:blank', `willeai-auth-${platform}`, 'width=760,height=820');
+  const platformDefinition = getPlatformDefinition(platform);
+  if (!platformCanAuth(platformDefinition)) {
+    state.authSessions.set(platform, {
+      status: 'failed',
+      message: authUnavailableText(platformDefinition),
+    });
+    renderPlatformGrid();
+    showToast(authUnavailableText(platformDefinition), 'warn');
+    return;
+  }
+
+  const popup = platformDefinition.authType === 'qrcode'
+    ? null
+    : window.open('about:blank', `willeai-auth-${platform}`, 'width=760,height=820');
   try {
     const result = await api(`/api/auth/${encodeURIComponent(platform)}`, { method: 'POST' });
+    const qrCodeUrl = isDataImageUrl(result.url) ? result.url : '';
     state.authSessions.set(platform, {
       sessionId: result.sessionId,
       status: 'pending',
       requiresSelection: false,
       selectableAccounts: [],
+      qrCodeUrl,
+      authUrl: qrCodeUrl ? '' : result.url,
+      expiresAt: result.expiresAt,
+      authInstructions: result.authInstructions || platformDefinition.authInstructions,
     });
     renderPlatformGrid();
-    if (result.url) {
+    if (qrCodeUrl) {
+      if (popup) {
+        popup.close();
+      }
+      showToast('请使用抖音 App 扫码完成账号连接。');
+    }
+    else if (result.url) {
       if (popup) {
         popup.location.href = result.url;
+        showToast('授权窗口已打开，请完成平台授权。');
       }
       else {
         showToast('浏览器拦截了授权窗口，请允许弹窗后重试。', 'warn');
       }
     }
+    else {
+      showToast('授权已发起，请按平台提示完成连接。');
+    }
     pollAuth(platform, result.sessionId);
-    showToast('授权窗口已打开，请完成平台授权。');
   }
   catch (error) {
     if (popup) {
       popup.close();
     }
+    state.authSessions.set(platform, {
+      status: 'failed',
+      message: error.message,
+    });
+    renderPlatformGrid();
     showToast(error.message, 'danger');
   }
 }
@@ -889,7 +1014,9 @@ async function pollAuth(platform, sessionId) {
     attempts += 1;
     try {
       const result = await api(`/api/auth/${encodeURIComponent(platform)}/status/${encodeURIComponent(sessionId)}`);
+      const previous = state.authSessions.get(platform) || {};
       state.authSessions.set(platform, {
+        ...previous,
         ...result,
         sessionId,
       });
@@ -901,6 +1028,10 @@ async function pollAuth(platform, sessionId) {
       }
       if (result.status === 'failed') {
         showToast('账号授权失败，请重新连接。', 'danger');
+        return;
+      }
+      if (result.status === 'expired') {
+        showToast('授权二维码已过期，请重新连接。', 'warn');
         return;
       }
       if (result.requiresSelection) {

@@ -761,6 +761,15 @@ h2 {
   border-color: var(--accent);
 }
 
+.connect-button:disabled,
+.connect-button.is-disabled,
+.connect-button.is-disabled:hover {
+  border-color: var(--line);
+  background: var(--surface-quiet);
+  color: var(--muted);
+  transform: none;
+}
+
 .account-list {
   display: grid;
   gap: 7px;
@@ -818,6 +827,48 @@ h2 {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.55;
+}
+
+.auth-qr-panel {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 116px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  border: 1px solid rgba(11, 127, 122, 0.18);
+  border-radius: var(--radius-panel);
+  background: linear-gradient(135deg, rgba(221, 240, 237, 0.86), rgba(255, 255, 255, 0.9));
+  padding: 10px;
+}
+
+.auth-qr-image {
+  width: 116px;
+  height: 116px;
+  border: 1px solid rgba(189, 203, 201, 0.78);
+  border-radius: var(--radius-control);
+  background: #ffffff;
+  object-fit: contain;
+}
+
+.auth-qr-copy {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.auth-qr-title {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 820;
+}
+
+.auth-qr-meta {
+  color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 .compose-layout {
@@ -1544,8 +1595,14 @@ button:focus-visible {
 
   .media-workspace-head,
   .drop-zone,
-  .media-item {
+  .media-item,
+  .auth-qr-panel {
     grid-template-columns: 1fr;
+  }
+
+  .auth-qr-image {
+    width: 132px;
+    height: 132px;
   }
 
   .media-workspace-head {
