@@ -259,18 +259,18 @@ function validatePublishPayload(body) {
     errors.push('至少选择一个已授权账号');
   }
   if (mediaUrls.length === 0) {
-    errors.push('至少填写一个公开视频或图片 HTTPS URL');
+    errors.push('请至少上传一个素材或填写一个备用素材链接');
   }
   if (mediaMode === 'video' && mediaUrls.length > 1) {
-    errors.push('视频模式一次提交一个视频 URL');
+    errors.push('视频模式一次只提交一个素材');
   }
   for (const url of mediaUrls) {
     if (!isHttpsUrl(url)) {
-      errors.push(`素材 URL 必须是 HTTPS：${url}`);
+      errors.push(`素材链接必须以 https:// 开头：${url}`);
     }
   }
   if (coverUrl && !isHttpsUrl(coverUrl)) {
-    errors.push(`封面 URL 必须是 HTTPS：${coverUrl}`);
+    errors.push(`封面链接必须以 https:// 开头：${coverUrl}`);
   }
 
   const accountMap = new Map();

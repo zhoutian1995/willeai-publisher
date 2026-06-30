@@ -59,13 +59,15 @@ const els = {
   selectedMetric: document.querySelector('#selectedMetric'),
   mediaMetric: document.querySelector('#mediaMetric'),
   preflightMetric: document.querySelector('#preflightMetric'),
-  pipelineStepAccounts: document.querySelector('#pipelineStepAccounts'),
-  pipelineStepContent: document.querySelector('#pipelineStepContent'),
-  pipelineStepPreflight: document.querySelector('#pipelineStepPreflight'),
-  pipelineStepSubmit: document.querySelector('#pipelineStepSubmit'),
+  nextActionTitle: document.querySelector('#nextActionTitle'),
+  nextActionText: document.querySelector('#nextActionText'),
+  nextActionButton: document.querySelector('#nextActionButton'),
+  accountSignal: document.querySelector('#accountSignal'),
+  contentSignal: document.querySelector('#contentSignal'),
+  mediaSignal: document.querySelector('#mediaSignal'),
+  submitSignal: document.querySelector('#submitSignal'),
   viewPanels: document.querySelectorAll('[data-view]'),
   viewTriggers: document.querySelectorAll('[data-view-target]'),
-  pipelineProxies: document.querySelectorAll('[data-pipeline-proxy]'),
 };
 
 function escapeHtml(value) {
@@ -360,7 +362,7 @@ function validateFilesForMode(files) {
 
 function renderMediaQueue() {
   if (state.mediaItems.length === 0) {
-    els.mediaQueue.innerHTML = '<p class="media-empty">素材队列为空。上传文件或粘贴 HTTPS URL 后会显示在这里。</p>';
+    els.mediaQueue.innerHTML = '<p class="media-empty">队列为空。上传文件或粘贴备用链接后会显示在这里。</p>';
     return;
   }
 
@@ -404,16 +406,16 @@ function updateMediaModeUi() {
   const isVideo = state.mediaMode === 'video';
   els.mediaLabel.textContent = isVideo ? '视频素材' : '图文素材';
   els.mediaHelp.textContent = isVideo
-    ? '拖拽或选择本地视频，上传成功后会自动加入素材队列。'
-    : '拖拽或选择本地图片，上传成功后会自动加入素材队列。';
+    ? '拖入本地视频或选择文件，上传成功后自动加入队列。'
+    : '拖入本地图片或选择文件，上传成功后自动加入队列。';
   els.dropZoneHint.textContent = isVideo
     ? '视频模式一次只接受 1 个视频文件。'
     : '图文模式支持一次选择多张图片。';
   els.fileInput.accept = isVideo ? 'video/*' : 'image/*';
   els.fileInput.multiple = !isVideo;
   els.mediaInput.placeholder = isVideo
-    ? '每行一个公开视频 HTTPS URL，可作为上传备用入口'
-    : '每行一个公开图片 HTTPS URL，可作为上传备用入口';
+    ? '每行粘贴一个公开视频链接，必须以 https:// 开头'
+    : '每行粘贴一个公开图片链接，必须以 https:// 开头';
 }
 
 function addMediaFiles(fileList) {
@@ -505,7 +507,7 @@ async function uploadMediaItem(item) {
     });
     const finalUrl = confirmed?.url || sign.url;
     if (!isHttpsUrl(finalUrl)) {
-      throw new Error('上传完成但未返回 HTTPS URL');
+      throw new Error('上传完成但未返回可用链接');
     }
     if (setMediaItem(item.id, { status: 'success', progress: 100, url: finalUrl, error: '' })) {
       showToast('素材上传完成。');
@@ -554,7 +556,7 @@ function buildPreflight() {
   const checks = [
     {
       ok: selectedAccounts.length > 0,
-      text: selectedAccounts.length > 0 ? `已选择 ${selectedAccounts.length} 个发布账号` : '至少选择一个已连接账号',
+      text: selectedAccounts.length > 0 ? `已选择 ${selectedAccounts.length} 个目标` : '还没有选择发布账号',
     },
     {
       ok: title.length > 0 || body.length > 0,
@@ -562,15 +564,15 @@ function buildPreflight() {
     },
     {
       ok: mediaUrls.length > 0,
-      text: mediaUrls.length > 0 ? `素材队列已有 ${mediaUrls.length} 个 HTTPS URL` : '至少上传一个素材或填写一个 HTTPS URL',
+      text: mediaUrls.length > 0 ? `已有 ${mediaUrls.length} 个可用素材链接` : '还没有可用素材',
     },
     {
       ok: uploadingCount === 0,
-      text: uploadingCount === 0 ? '没有正在上传的素材' : `还有 ${uploadingCount} 个素材正在上传`,
+      text: uploadingCount === 0 ? '没有等待上传的文件' : `等待 ${uploadingCount} 个素材上传完成`,
     },
     {
       ok: state.mediaMode !== 'video' || mediaUrls.length <= 1,
-      text: state.mediaMode !== 'video' || mediaUrls.length <= 1 ? '素材数量符合当前模式' : '视频模式一次只允许 1 个素材',
+      text: state.mediaMode !== 'video' || mediaUrls.length <= 1 ? '素材数量符合当前模式' : '视频模式只保留 1 个素材',
     },
     {
       ok: uploadedItems.every(item => state.mediaMode === 'video' ? item.kind === 'video' : item.kind === 'image'),
@@ -582,7 +584,7 @@ function buildPreflight() {
     },
     {
       ok: mediaUrls.every(isHttpsUrl) && (!cover || isHttpsUrl(cover)),
-      text: '素材和封面必须使用 HTTPS URL',
+      text: '素材和封面链接必须以 https:// 开头',
     },
   ];
 
@@ -605,7 +607,7 @@ function buildPreflight() {
     checks.push({
       ok: false,
       warn: true,
-      text: '小红书账号已选择，首版标记为需单独验证',
+      text: '小红书目标已选择，发布后请单独复核结果',
     });
   }
 
@@ -647,35 +649,72 @@ function updateOverview(preflight) {
     els.preflightMetric.closest('.metric-tile')?.classList.toggle('is-danger', false);
   }
 
-  const steps = [
-    [els.pipelineStepAccounts, hasAccounts],
-    [els.pipelineStepContent, hasContent],
-    [els.pipelineStepPreflight, isReady],
-    [els.pipelineStepSubmit, Boolean(state.activeFlowId)],
-  ];
-  const activeIndex = steps.findIndex(([, complete]) => !complete);
-  for (const [element, complete] of steps) {
-    if (!element) {
-      continue;
-    }
-    const index = steps.findIndex(([stepElement]) => stepElement === element);
-    element.classList.toggle('is-complete', complete);
-    element.classList.toggle('is-active', index === activeIndex);
-  }
+  updateOverviewSignals({ hasAccounts, hasContent, hasMedia, isReady, normalCount, selectedCount: selectedAccounts.length, mediaCount: mediaUrls.length });
+}
 
-  const proxySteps = [
-    ['accounts', hasAccounts],
-    ['content', hasContent],
-    ['preflight', isReady],
-    ['submit', Boolean(state.activeFlowId)],
-  ];
-  const proxyActiveIndex = proxySteps.findIndex(([, complete]) => !complete);
-  els.pipelineProxies.forEach((element) => {
-    const index = proxySteps.findIndex(([name]) => name === element.dataset.pipelineProxy);
-    const complete = proxySteps[index]?.[1] || false;
-    element.classList.toggle('is-complete', complete);
-    element.classList.toggle('is-active', index === proxyActiveIndex);
-  });
+function updateOverviewSignals(summary) {
+  const activeFlow = Boolean(state.activeFlowId);
+  const next = !summary.hasAccounts
+    ? {
+      title: '先选择目标',
+      text: summary.normalCount > 0 ? '勾选本次要同步的平台账号。' : '先连接至少一个可用平台账号。',
+      view: 'accounts',
+    }
+    : !summary.hasContent
+      ? {
+        title: '补齐正文',
+        text: '填写标题或正文，让各平台有可同步的内容。',
+        view: 'compose',
+      }
+      : !summary.hasMedia
+        ? {
+          title: '加入素材',
+          text: '上传文件，或粘贴符合要求的备用素材链接。',
+          view: 'compose',
+        }
+        : !summary.isReady
+          ? {
+            title: '处理阻塞项',
+            text: '打开检查页，按提示修正提交前问题。',
+            view: 'publish',
+          }
+          : activeFlow
+            ? {
+              title: '查看任务结果',
+              text: '任务已经提交，继续观察各平台返回状态。',
+              view: 'publish',
+            }
+            : {
+              title: '可以提交',
+              text: '目标、正文和素材已就绪，可以进入最终检查。',
+              view: 'publish',
+            };
+
+  if (els.nextActionTitle) {
+    els.nextActionTitle.textContent = next.title;
+  }
+  if (els.nextActionText) {
+    els.nextActionText.textContent = next.text;
+  }
+  if (els.nextActionButton) {
+    els.nextActionButton.dataset.viewTarget = next.view;
+  }
+  if (els.accountSignal) {
+    els.accountSignal.textContent = summary.hasAccounts ? `已选 ${summary.selectedCount} 个目标` : '等待选择目标';
+    els.accountSignal.classList.toggle('is-ok', summary.hasAccounts);
+  }
+  if (els.contentSignal) {
+    els.contentSignal.textContent = summary.hasContent ? '正文已准备' : '正文未填写';
+    els.contentSignal.classList.toggle('is-ok', summary.hasContent);
+  }
+  if (els.mediaSignal) {
+    els.mediaSignal.textContent = summary.hasMedia ? `素材 ${summary.mediaCount} 个` : '素材未就绪';
+    els.mediaSignal.classList.toggle('is-ok', summary.hasMedia);
+  }
+  if (els.submitSignal) {
+    els.submitSignal.textContent = activeFlow ? '任务已提交' : summary.isReady ? '等待提交' : '尚未提交任务';
+    els.submitSignal.classList.toggle('is-ok', activeFlow);
+  }
 }
 
 function setActiveView(viewName) {
@@ -699,7 +738,7 @@ function renderFlow(flow) {
   if (!flow || !flow.flowId) {
     state.activeFlowId = '';
     els.flowMeta.textContent = '未提交';
-    els.flowBox.innerHTML = '<p class="empty-state">选择账号并填写 HTTPS 素材 URL 后，预检和发布结果会显示在这里。</p>';
+    els.flowBox.innerHTML = '<p class="empty-state">选择目标并准备素材后，任务结果会显示在这里。</p>';
     updateOverview();
     return;
   }
@@ -709,7 +748,7 @@ function renderFlow(flow) {
   const tasks = Array.isArray(flow.tasks) ? flow.tasks : [];
   els.flowBox.innerHTML = `
     <div class="flow-summary">
-      <strong>Flow 已创建</strong>
+      <strong>任务已创建</strong>
       <div class="flow-id">${escapeHtml(flow.flowId)}</div>
     </div>
     <div class="task-list">
@@ -956,7 +995,7 @@ async function submitPublish(event) {
     state.activeFlowId = flow.flowId;
     renderFlow(flow);
     setActiveView('publish');
-    showToast('发布 Flow 已提交。');
+    showToast('发布任务已提交。');
     startFlowPolling(flow.flowId);
   }
   catch (error) {

@@ -6,9 +6,10 @@
     <title>WilleAI Publish Studio</title>
     <meta name="description" content="WilleAI 跨平台内容发布工作台" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=20260630-assets1" />
+    <link rel="stylesheet" href="/styles.css?v=20260630-studio2" />
   </head>
   <body>
+    <a class="skip-link" href="#overviewTitle">跳到工作区</a>
     <div class="app-shell">
       <header class="topbar">
         <div class="brand-mark" aria-label="WilleAI">
@@ -44,15 +45,14 @@
           <div class="hero-panel">
             <div class="hero-copy">
               <p class="eyebrow">publish.willeai.cn</p>
-              <h1 id="overviewTitle">发布工作台</h1>
-              <p>把账号、内容、预检和发布结果拆成独立工作区。先看状态，再进入当前要处理的环节。</p>
+              <h1 id="overviewTitle">WilleAI 发布台</h1>
+              <p>面向运营者的跨平台发布控制台。先确认准备度，再进入当前需要处理的工作区。</p>
+              <div class="hero-actions">
+                <button class="primary-button" type="button" data-view-target="compose">继续编辑</button>
+                <button class="dark-ghost-button" type="button" data-view-target="publish">查看检查</button>
+              </div>
             </div>
-            <div class="pipeline-strip overview-pipeline" aria-label="发布阶段">
-              <span class="pipeline-step" id="pipelineStepAccounts">账号</span>
-              <span class="pipeline-step" id="pipelineStepContent">内容</span>
-              <span class="pipeline-step" id="pipelineStepPreflight">预检</span>
-              <span class="pipeline-step" id="pipelineStepSubmit">发布</span>
-            </div>
+            <div class="hero-media" role="img" aria-label="媒体发布控制台视觉图"></div>
           </div>
 
           <div class="status-grid" aria-label="发布工作台状态">
@@ -74,24 +74,21 @@
             </button>
           </div>
 
-          <div class="overview-grid">
-            <article class="overview-card">
-              <span class="card-index">1</span>
-              <h2>连接账号</h2>
-              <p>授权平台账号，选择这次要发布的目标。</p>
-              <button class="text-button" type="button" data-view-target="accounts">进入账号</button>
+          <div class="overview-board">
+            <article class="next-action-panel">
+              <p class="section-kicker">下一步</p>
+              <h2 id="nextActionTitle">先连接目标</h2>
+              <p id="nextActionText">选择至少一个已连接的平台账号，发布前检查才会继续通过。</p>
+              <button class="text-button" id="nextActionButton" type="button" data-view-target="accounts">去处理</button>
             </article>
-            <article class="overview-card">
-              <span class="card-index">2</span>
-              <h2>准备内容</h2>
-              <p>填写标题、正文、素材 URL 和计划发布时间。</p>
-              <button class="text-button" type="button" data-view-target="compose">编辑内容</button>
-            </article>
-            <article class="overview-card">
-              <span class="card-index">3</span>
-              <h2>检查并发布</h2>
-              <p>修正预检阻塞项，提交后在这里追踪平台任务。</p>
-              <button class="text-button" type="button" data-view-target="publish">查看发布</button>
+            <article class="signal-panel">
+              <p class="section-kicker">当前状态</p>
+              <div class="signal-list" aria-label="准备状态摘要">
+                <span id="accountSignal">等待选择目标</span>
+                <span id="contentSignal">正文未填写</span>
+                <span id="mediaSignal">素材未就绪</span>
+                <span id="submitSignal">尚未提交任务</span>
+              </div>
             </article>
           </div>
         </section>
@@ -100,8 +97,8 @@
           <div class="section-head">
             <div>
               <p class="section-kicker">账号</p>
-              <h2 id="accountsTitle">发布目标</h2>
-              <p>先连接平台账号，再选择本次要同步发布的目标。</p>
+              <h2 id="accountsTitle">目标管理</h2>
+              <p>连接平台授权，并勾选本次要同步的账号。</p>
             </div>
             <span class="meta" id="accountCount">0 个账号</span>
           </div>
@@ -114,8 +111,8 @@
               <div class="section-head editor-toolbar">
                 <div>
                   <p class="section-kicker">内容</p>
-                  <h2 id="editorTitle">准备发布</h2>
-                  <p>内容输入和素材管理放在一个宽工作区里，减少在窄栏里编辑长文。</p>
+                  <h2 id="editorTitle">素材与正文</h2>
+                  <p>在同一工作区完成正文、素材和排期，减少来回切换。</p>
                 </div>
                 <div class="segmented" role="group" aria-label="素材类型">
                   <button type="button" class="segment is-active" data-media-mode="video">视频</button>
@@ -136,7 +133,7 @@
                   <div class="media-workspace-head">
                     <div>
                       <span id="mediaLabel" class="field-title">视频素材</span>
-                      <p id="mediaHelp">拖拽或选择本地视频，上传成功后会自动加入素材队列。</p>
+                      <p id="mediaHelp">拖入素材或选择文件，上传成功后自动加入队列。</p>
                     </div>
                     <button class="small-button" id="clearMediaButton" type="button">清空素材</button>
                   </div>
@@ -144,25 +141,25 @@
                   <div class="drop-zone" id="dropZone" tabindex="0" role="button" aria-describedby="mediaHelp">
                     <input id="fileInput" class="visually-hidden" type="file" accept="video/*" />
                     <div class="drop-zone-copy">
-                      <strong>选择文件或拖到这里</strong>
+                      <strong>拖入素材或选择文件</strong>
                       <span id="dropZoneHint">视频模式一次只接受 1 个视频文件。</span>
                     </div>
                     <button class="secondary-button" id="chooseFileButton" type="button">选择文件</button>
                   </div>
 
                   <div class="media-queue" id="mediaQueue" aria-live="polite">
-                    <p class="media-empty">素材队列为空。上传文件或粘贴 HTTPS URL 后会显示在这里。</p>
+                    <p class="media-empty">队列为空。上传文件或粘贴备用链接后会显示在这里。</p>
                   </div>
 
                   <label class="field media-url-field">
-                    <span>手动 HTTPS URL</span>
-                    <textarea id="mediaInput" rows="4" placeholder="每行一个公开视频 HTTPS URL，可作为上传备用入口"></textarea>
+                    <span>备用素材链接</span>
+                    <textarea id="mediaInput" rows="4" placeholder="每行粘贴一个公开视频链接，必须以 https:// 开头"></textarea>
                   </label>
                 </section>
                 <div class="inline-fields">
                   <label class="field">
-                    <span>封面 URL</span>
-                    <input id="coverInput" type="url" placeholder="可选，HTTPS URL" />
+                    <span>封面链接</span>
+                    <input id="coverInput" type="url" placeholder="选填，必须以 https:// 开头" />
                   </label>
                   <label class="field">
                     <span>发布时间</span>
@@ -174,18 +171,18 @@
 
             <aside class="compose-aside" aria-label="发布操作">
               <div class="aside-box">
-                <p class="section-kicker">下一步</p>
-                <h2>提交前检查</h2>
-                <p>保存当前输入后到发布页查看预检结果。所有必填项通过后即可提交。</p>
+                <p class="section-kicker">提交前</p>
+                <h2>交付检查</h2>
+                <p>必填项通过后可直接提交；也可以先打开检查页查看阻塞项。</p>
                 <div class="action-row vertical-actions">
                   <button class="primary-button" id="publishButton" type="submit">
                     <svg viewBox="0 0 24 24" aria-hidden="true">
                       <path d="m22 2-7 20-4-9-9-4Z" />
                       <path d="M22 2 11 13" />
                     </svg>
-                    一键发布
+                    提交发布
                   </button>
-                  <button class="secondary-button" type="button" data-view-target="publish">查看预检</button>
+                  <button class="secondary-button" type="button" data-view-target="publish">查看检查</button>
                   <button class="secondary-button" id="clearButton" type="button">
                     <svg viewBox="0 0 24 24" aria-hidden="true">
                       <path d="M3 6h18" />
@@ -206,30 +203,25 @@
               <div class="section-head">
                 <div>
                   <p class="section-kicker">预检</p>
-                  <h2 id="resultTitle">发布检查</h2>
-                  <p>这里集中展示阻塞项和当前发布阶段，不占用内容编辑区。</p>
+                  <h2 id="resultTitle">提交检查</h2>
+                  <p>集中展示阻塞项和提醒，修正后即可提交。</p>
                 </div>
                 <span class="meta" id="flowMeta">未提交</span>
               </div>
 
-              <div class="pipeline-strip" aria-label="发布阶段">
-                <span class="pipeline-step" data-pipeline-proxy="accounts">账号</span>
-                <span class="pipeline-step" data-pipeline-proxy="content">内容</span>
-                <span class="pipeline-step" data-pipeline-proxy="preflight">预检</span>
-                <span class="pipeline-step" data-pipeline-proxy="submit">发布</span>
-              </div>
               <div class="preflight" id="preflightList" aria-live="polite"></div>
             </section>
 
             <section class="publish-results" aria-labelledby="flowTitle">
+              <div class="result-visual" role="img" aria-label="多平台分发任务流视觉图"></div>
               <div class="section-head compact-head">
                 <div>
                   <p class="section-kicker">结果</p>
-                  <h2 id="flowTitle">发布流</h2>
+                  <h2 id="flowTitle">任务流</h2>
                 </div>
               </div>
               <div class="flow-box" id="flowBox">
-                <p class="empty-state">选择账号并填写 HTTPS 素材 URL 后，预检和发布结果会显示在这里。</p>
+                <p class="empty-state">选择目标并准备素材后，任务结果会显示在这里。</p>
               </div>
             </section>
           </div>
@@ -239,6 +231,6 @@
     </div>
 
     <div class="toast-region" id="toastRegion" aria-live="polite"></div>
-    <script src="/app.js?v=20260630-assets1" type="module"></script>
+    <script src="/app.js?v=20260630-studio2" type="module"></script>
   </body>
 </html>
