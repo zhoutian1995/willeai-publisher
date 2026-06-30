@@ -27,7 +27,7 @@ node server.js
 代码推送到 `main` 后，GitHub Actions 会自动：
 
 1. 运行 `node --check server.js` 和 `node --check public/app.js`
-2. 通过 SSH 上传代码到 `/home/admin/project/willeai-publisher`
+2. 如果配置了 `SSH_PRIVATE_KEY`，通过 SSH 上传代码到 `/home/admin/project/willeai-publisher`
 3. 写入服务器 `.env`
 4. 用 PM2 启动或重载 `willeai-publisher`
 5. 写入 `publish.willeai.cn` 的 Nginx 反代配置并 reload
@@ -40,6 +40,8 @@ AITOEARN_API_KEY=<匹配 aitoearn.cn 的 OpenAPI Key>
 ```
 
 服务器地址、用户名、上游地址和公开域名写在 workflow 中。`AITOEARN_API_KEY` 没有配置时，域名仍可打开，但工作台会显示“缺少 API Key”，不能拉取平台、账号或发布。
+
+如果 GitHub token 暂时没有写 Actions Secrets 的权限，服务器上的 `willeai-publisher-deployer` PM2 进程会每 60 秒轮询 GitHub `main`，发现新提交后自动拉取、校验、同步、重启应用并 reload Nginx。
 
 ## 手动服务器部署
 

@@ -46,17 +46,33 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Check deployment credentials
+        id: deploy_credentials
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          if [ -z "$SSH_PRIVATE_KEY" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::SSH_PRIVATE_KEY is not configured; SSH deployment is skipped. The server-side poller can still deploy from main."
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Setup SSH
+        if: steps.deploy_credentials.outputs.enabled == 'true'
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: |
           test -n "$SERVER_HOST"
           test -n "$SERVER_USER"
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
-          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H "$SERVER_HOST" >> ~/.ssh/known_hosts
 
       - name: Upload application
+        if: steps.deploy_credentials.outputs.enabled == 'true'
         run: |
           ssh -i ~/.ssh/deploy_key "$SERVER_USER@$SERVER_HOST" "mkdir -p '$DEPLOY_PATH'"
           rsync -az --delete \
@@ -66,6 +82,7 @@ jobs:
             ./ "$SERVER_USER@$SERVER_HOST:$DEPLOY_PATH/"
 
       - name: Configure and restart
+        if: steps.deploy_credentials.outputs.enabled == 'true'
         run: |
           ssh -i ~/.ssh/deploy_key "$SERVER_USER@$SERVER_HOST" \
             "DEPLOY_PATH='$DEPLOY_PATH' PORT='$PORT' HOST='$HOST' AITOEARN_BASE_URL='$AITOEARN_BASE_URL' AITOEARN_API_KEY='$AITOEARN_API_KEY' PUBLIC_ORIGIN='$PUBLIC_ORIGIN' bash -s" <<'REMOTE'
@@ -139,3 +156,9 @@ jobs:
           nginx -t
           nginx -s reload
           REMOTE
+
+      - name: Skip SSH deployment
+        if: steps.deploy_credentials.outputs.enabled != 'true'
+        run: |
+          echo "SSH deployment skipped because SSH_PRIVATE_KEY is not configured."
+          echo "The production server runs willeai-publisher-deployer, which polls main and deploys automatically."
