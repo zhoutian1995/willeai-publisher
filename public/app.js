@@ -288,11 +288,12 @@ function renderLogo(platform) {
 }
 
 function renderAvatar(account) {
-  if (account.avatar) {
-    return `<img src="${escapeHtml(account.avatar)}" alt="" />`;
-  }
-  if (account.avatarUrl) {
-    return `<img src="${escapeHtml(account.avatarUrl)}" alt="" />`;
+  const avatarUrl = account.avatar || account.avatarUrl;
+  if (avatarUrl) {
+    return `
+      <span class="avatar-fallback" aria-hidden="true">${initials(accountName(account))}</span>
+      <img src="/api/avatar?url=${encodeURIComponent(avatarUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer" />
+    `;
   }
   return initials(accountName(account));
 }

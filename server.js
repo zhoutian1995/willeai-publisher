@@ -15,6 +15,13 @@ const apiKey = process.env.AITOEARN_API_KEY || '';
 const publicOrigin = normalizeBaseUrl(process.env.PUBLIC_ORIGIN || 'https://publish.willeai.cn');
 const requestTimeoutMs = Number(process.env.REQUEST_TIMEOUT_MS || 25000);
 const assetIdPattern = /^[A-Za-z0-9_-]{8,128}$/;
+const avatarHostSuffixes = [
+  '.hdslb.com',
+  '.qlogo.cn',
+  '.douyinpic.com',
+  '.douyinstatic.com',
+  '.byteimg.com',
+];
 
 const jsonHeaders = {
   'Content-Type': 'application/json; charset=utf-8',
@@ -79,6 +86,70 @@ function isHttpsUrl(value) {
   }
   catch {
     return false;
+  }
+}
+
+function isAllowedAvatarUrl(value) {
+  if (!isHttpsUrl(value)) {
+    return false;
+  }
+  const url = new URL(value.trim());
+  return avatarHostSuffixes.some(suffix => url.hostname === suffix.slice(1) || url.hostname.endsWith(suffix));
+}
+
+async function proxyAvatar(res, sourceUrl) {
+  if (!isAllowedAvatarUrl(sourceUrl)) {
+    res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end('Avatar URL is not allowed');
+    return;
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch(sourceUrl, {
+      headers: {
+        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        'User-Agent': 'Mozilla/5.0 WilleAI-Publisher/0.1',
+        'Referer': new URL(sourceUrl).origin,
+      },
+      signal: controller.signal,
+    });
+    const contentType = response.headers.get('content-type') || '';
+    if (!response.ok || !contentType.startsWith('image/')) {
+      res.writeHead(response.ok ? 415 : response.status, {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Cache-Control': 'no-store',
+      });
+      res.end('Avatar image unavailable');
+      return;
+    }
+    const contentLength = Number(response.headers.get('content-length') || 0);
+    if (contentLength > 5 * 1024 * 1024) {
+      res.writeHead(413, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end('Avatar image is too large');
+      return;
+    }
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (buffer.length > 5 * 1024 * 1024) {
+      res.writeHead(413, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end('Avatar image is too large');
+      return;
+    }
+    res.writeHead(200, {
+      'Content-Type': contentType,
+      'Cache-Control': 'public, max-age=86400',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    res.end(buffer);
+  }
+  catch (error) {
+    const statusCode = error.name === 'AbortError' ? 504 : 502;
+    res.writeHead(statusCode, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end('Avatar image unavailable');
+  }
+  finally {
+    clearTimeout(timer);
   }
 }
 
@@ -403,6 +474,11 @@ async function handleApi(req, res, url) {
     if (url.pathname === '/api/accounts' && req.method === 'GET') {
       const result = await upstream(req, '/v2/channels/accounts');
       ok(res, normalizeAccounts(result.data));
+      return;
+    }
+
+    if (url.pathname === '/api/avatar' && req.method === 'GET') {
+      await proxyAvatar(res, url.searchParams.get('url') || '');
       return;
     }
 
