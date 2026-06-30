@@ -116,9 +116,39 @@ async function api(path, options = {}) {
   if (!response.ok || !payload.ok) {
     const error = new Error(payload.message || `请求失败：${response.status}`);
     error.details = payload.details;
+    error.statusCode = response.status;
+    error.transient = [502, 503, 504].includes(response.status);
     throw error;
   }
   return payload.data;
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function apiWithRetry(path, options = {}, retryOptions = {}) {
+  const retries = Number(retryOptions.retries ?? 2);
+  const delayMs = Number(retryOptions.delayMs ?? 1200);
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return await api(path, options);
+    }
+    catch (error) {
+      if (!error.transient || attempt >= retries) {
+        throw error;
+      }
+      await sleep(delayMs * (attempt + 1));
+    }
+  }
+  return null;
+}
+
+function authErrorMessage(error) {
+  if (error?.transient) {
+    return '平台授权服务暂时不可用，已自动重试；请稍后再试。';
+  }
+  return error?.message || '授权请求失败，请稍后重试。';
 }
 
 function showToast(message, tone = 'info') {
@@ -377,12 +407,13 @@ function renderAuthSession(platformId) {
         <div class="auth-qr-copy">
           <span class="auth-qr-title">${escapeHtml(getPlatformName(platform))}扫码连接</span>
           <span>${escapeHtml(instruction)}</span>
+          ${session.message ? `<span class="auth-qr-meta">${escapeHtml(session.message)}</span>` : ''}
           ${expiresAt ? `<span class="auth-qr-meta">有效期至 ${escapeHtml(expiresAt)}</span>` : ''}
         </div>
       </div>
     `;
   }
-  return '<p class="account-note">授权窗口已打开，完成后这里会自动更新。</p>';
+  return `<p class="account-note">${escapeHtml(session.message || '授权窗口已打开，完成后这里会自动更新。')}</p>`;
 }
 
 function getMediaUrls() {
@@ -962,7 +993,10 @@ async function startAuth(platform) {
     ? null
     : window.open('about:blank', `willeai-auth-${platform}`, 'width=760,height=820');
   try {
-    const result = await api(`/api/auth/${encodeURIComponent(platform)}`, { method: 'POST' });
+    const result = await apiWithRetry(`/api/auth/${encodeURIComponent(platform)}`, { method: 'POST' }, {
+      retries: 2,
+      delayMs: 1400,
+    });
     const qrCodeUrl = isDataImageUrl(result.url) ? result.url : '';
     state.authSessions.set(platform, {
       sessionId: result.sessionId,
@@ -1001,19 +1035,21 @@ async function startAuth(platform) {
     }
     state.authSessions.set(platform, {
       status: 'failed',
-      message: error.message,
+      message: authErrorMessage(error),
     });
     renderPlatformGrid();
-    showToast(error.message, 'danger');
+    showToast(authErrorMessage(error), 'danger');
   }
 }
 
 async function pollAuth(platform, sessionId) {
   let attempts = 0;
+  let transientFailures = 0;
   const run = async () => {
     attempts += 1;
     try {
       const result = await api(`/api/auth/${encodeURIComponent(platform)}/status/${encodeURIComponent(sessionId)}`);
+      transientFailures = 0;
       const previous = state.authSessions.get(platform) || {};
       state.authSessions.set(platform, {
         ...previous,
@@ -1043,11 +1079,24 @@ async function pollAuth(platform, sessionId) {
       }
     }
     catch (error) {
+      if (error.transient && transientFailures < 8) {
+        transientFailures += 1;
+        const previous = state.authSessions.get(platform) || {};
+        state.authSessions.set(platform, {
+          ...previous,
+          sessionId,
+          status: 'pending',
+          message: '平台授权服务暂时不可用，正在自动重试。',
+        });
+        renderPlatformGrid();
+        setTimeout(run, 4000);
+        return;
+      }
       if (attempts < 4) {
         setTimeout(run, 3000);
         return;
       }
-      showToast(error.message, 'danger');
+      showToast(authErrorMessage(error), 'danger');
     }
   };
   setTimeout(run, 1500);

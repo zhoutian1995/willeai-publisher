@@ -190,7 +190,7 @@ async function upstream(req, pathname, options = {}) {
     if (!response.ok) {
       throw Object.assign(new Error(getUpstreamMessage(payload) || `AiToEarn 请求失败：${response.status}`), {
         statusCode: response.status,
-        upstream: payload,
+        upstream: summarizeUpstreamPayload(payload),
       });
     }
 
@@ -224,7 +224,33 @@ function getUpstreamMessage(payload) {
   if (payload && typeof payload === 'object') {
     return payload.message || payload.msg || payload.error;
   }
-  return typeof payload === 'string' ? payload.slice(0, 300) : '';
+  if (typeof payload === 'string') {
+    if (isHtmlPayload(payload)) {
+      return /502 Bad Gateway/i.test(payload)
+        ? 'AiToEarn 授权服务暂时不可用，请稍后重试'
+        : 'AiToEarn 返回了非 JSON 响应，请稍后重试';
+    }
+    return payload.slice(0, 300);
+  }
+  return '';
+}
+
+function isHtmlPayload(payload) {
+  return typeof payload === 'string' && /<!doctype html|<html[\s>]|<title>/i.test(payload);
+}
+
+function summarizeUpstreamPayload(payload) {
+  if (typeof payload !== 'string') {
+    return payload;
+  }
+  if (!isHtmlPayload(payload)) {
+    return payload.slice(0, 500);
+  }
+  const title = payload.match(/<title>(.*?)<\/title>/i)?.[1]?.trim();
+  return {
+    type: 'html',
+    title: title || 'HTML response',
+  };
 }
 
 function normalizeAccounts(data) {
