@@ -91,24 +91,34 @@ jobs:
           fi
           pm2 save
 
+          mkdir -p /var/www/publish.willeai.cn
+
           cat > /www/server/panel/vhost/nginx/publish.willeai.cn.conf <<'NGINX'
           server {
               listen 80;
+              server_name publish.willeai.cn;
+
+              location /.well-known/acme-challenge/ {
+                  root /var/www/publish.willeai.cn;
+              }
+
+              location / {
+                  return 301 https://$host$request_uri;
+              }
+          }
+
+          server {
               listen 443 ssl;
               http2 on;
               server_name publish.willeai.cn;
 
-              ssl_certificate /www/server/panel/vhost/cert/willeai.cn/fullchain.pem;
-              ssl_certificate_key /www/server/panel/vhost/cert/willeai.cn/privkey.pem;
+              ssl_certificate /etc/letsencrypt/live/publish.willeai.cn/fullchain.pem;
+              ssl_certificate_key /etc/letsencrypt/live/publish.willeai.cn/privkey.pem;
               ssl_protocols TLSv1.2 TLSv1.3;
               ssl_ciphers HIGH:!aNULL:!MD5;
 
               access_log /www/wwwlogs/publish.willeai.cn.log;
               error_log /www/wwwlogs/publish.willeai.cn.error.log;
-
-              if ($server_port = 80) {
-                  return 301 https://$host$request_uri;
-              }
 
               location / {
                   proxy_pass http://127.0.0.1:3200;
