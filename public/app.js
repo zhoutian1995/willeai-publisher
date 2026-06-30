@@ -22,7 +22,9 @@ const state = {
   accounts: [],
   selectedAccountIds: new Set(),
   authSessions: new Map(),
+  mediaItems: [],
   mediaMode: 'video',
+  nextMediaId: 1,
   activeFlowId: '',
   flowTimer: null,
   accountRefreshTimer: null,
@@ -40,6 +42,13 @@ const els = {
   bodyInput: document.querySelector('#bodyInput'),
   mediaInput: document.querySelector('#mediaInput'),
   mediaLabel: document.querySelector('#mediaLabel'),
+  mediaHelp: document.querySelector('#mediaHelp'),
+  fileInput: document.querySelector('#fileInput'),
+  dropZone: document.querySelector('#dropZone'),
+  dropZoneHint: document.querySelector('#dropZoneHint'),
+  chooseFileButton: document.querySelector('#chooseFileButton'),
+  clearMediaButton: document.querySelector('#clearMediaButton'),
+  mediaQueue: document.querySelector('#mediaQueue'),
   coverInput: document.querySelector('#coverInput'),
   publishAtInput: document.querySelector('#publishAtInput'),
   preflightList: document.querySelector('#preflightList'),
@@ -282,10 +291,253 @@ function renderAuthSession(platformId) {
 }
 
 function getMediaUrls() {
-  return els.mediaInput.value
+  const uploadedUrls = state.mediaItems
+    .filter(item => item.status === 'success' && item.url)
+    .map(item => item.url);
+  const manualUrls = els.mediaInput.value
     .split(/\r?\n/)
     .map(item => item.trim())
     .filter(Boolean);
+
+  return [...new Set([...uploadedUrls, ...manualUrls])];
+}
+
+function formatFileSize(bytes) {
+  const size = Number(bytes || 0);
+  if (size < 1024) {
+    return `${size} B`;
+  }
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`;
+  }
+  if (size < 1024 * 1024 * 1024) {
+    return `${(size / 1024 / 1024).toFixed(1)} MB`;
+  }
+  return `${(size / 1024 / 1024 / 1024).toFixed(1)} GB`;
+}
+
+function getMediaKind(file) {
+  if (file.type.startsWith('video/')) {
+    return 'video';
+  }
+  if (file.type.startsWith('image/')) {
+    return 'image';
+  }
+  const name = file.name.toLowerCase();
+  if (/\.(mp4|mov|m4v|webm)$/.test(name)) {
+    return 'video';
+  }
+  if (/\.(jpg|jpeg|png|webp|gif|avif)$/.test(name)) {
+    return 'image';
+  }
+  return '';
+}
+
+function validateFilesForMode(files) {
+  const list = [...files];
+  if (list.length === 0) {
+    return [];
+  }
+  if (state.mediaMode === 'video') {
+    if (list.length > 1 || state.mediaItems.some(item => item.status !== 'removed') || getMediaUrls().length > 0) {
+      showToast('视频模式一次只允许 1 个视频素材，请先删除已有素材。', 'warn');
+      return [];
+    }
+    const file = list[0];
+    if (getMediaKind(file) !== 'video') {
+      showToast('视频模式只接受视频文件。', 'warn');
+      return [];
+    }
+    return [file];
+  }
+
+  const imageFiles = list.filter(file => getMediaKind(file) === 'image');
+  if (imageFiles.length !== list.length) {
+    showToast('图文模式只接受图片文件，已忽略其它文件。', 'warn');
+  }
+  return imageFiles;
+}
+
+function renderMediaQueue() {
+  if (state.mediaItems.length === 0) {
+    els.mediaQueue.innerHTML = '<p class="media-empty">素材队列为空。上传文件或粘贴 HTTPS URL 后会显示在这里。</p>';
+    return;
+  }
+
+  els.mediaQueue.innerHTML = state.mediaItems.map((item) => {
+    const statusTone = item.status === 'success' ? 'ok' : item.status === 'error' ? 'danger' : 'warn';
+    const statusText = item.status === 'success'
+      ? '已上传'
+      : item.status === 'error'
+        ? '失败'
+        : item.status === 'confirming'
+          ? '确认中'
+          : '上传中';
+    const canRetry = item.status === 'error' && item.file;
+    const progress = Math.max(0, Math.min(100, Number(item.progress || 0)));
+    return `
+      <article class="media-item${item.status === 'success' ? ' is-success' : item.status === 'error' ? ' is-error' : ''}" data-media-id="${escapeHtml(item.id)}">
+        <div class="media-item-main">
+          <div class="media-title-row">
+            <span class="media-name" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</span>
+            <span class="mini-pill is-${statusTone}">${escapeHtml(statusText)}</span>
+          </div>
+          <p class="media-meta">${escapeHtml(formatFileSize(item.size))} · ${escapeHtml(item.type || item.kind || '未知类型')}</p>
+          ${item.status !== 'success' && item.status !== 'error' ? `
+            <div class="progress-track" aria-label="上传进度">
+              <div class="progress-bar" style="width: ${progress}%"></div>
+            </div>
+          ` : ''}
+          ${item.url ? `<p class="media-url">${escapeHtml(item.url)}</p>` : ''}
+          ${item.error ? `<p class="media-error">${escapeHtml(item.error)}</p>` : ''}
+        </div>
+        <div class="media-actions">
+          ${canRetry ? `<button class="media-action" type="button" data-action="retry-media" data-media-id="${escapeHtml(item.id)}">重试</button>` : ''}
+          <button class="media-action" type="button" data-action="remove-media" data-media-id="${escapeHtml(item.id)}">删除</button>
+        </div>
+      </article>
+    `;
+  }).join('');
+}
+
+function updateMediaModeUi() {
+  const isVideo = state.mediaMode === 'video';
+  els.mediaLabel.textContent = isVideo ? '视频素材' : '图文素材';
+  els.mediaHelp.textContent = isVideo
+    ? '拖拽或选择本地视频，上传成功后会自动加入素材队列。'
+    : '拖拽或选择本地图片，上传成功后会自动加入素材队列。';
+  els.dropZoneHint.textContent = isVideo
+    ? '视频模式一次只接受 1 个视频文件。'
+    : '图文模式支持一次选择多张图片。';
+  els.fileInput.accept = isVideo ? 'video/*' : 'image/*';
+  els.fileInput.multiple = !isVideo;
+  els.mediaInput.placeholder = isVideo
+    ? '每行一个公开视频 HTTPS URL，可作为上传备用入口'
+    : '每行一个公开图片 HTTPS URL，可作为上传备用入口';
+}
+
+function addMediaFiles(fileList) {
+  const files = validateFilesForMode(fileList);
+  if (files.length === 0) {
+    return;
+  }
+
+  for (const file of files) {
+    const kind = getMediaKind(file);
+    const item = {
+      id: `media-${state.nextMediaId++}`,
+      file,
+      name: file.name || `media-${Date.now()}`,
+      size: file.size,
+      type: file.type || 'application/octet-stream',
+      kind,
+      status: 'uploading',
+      progress: 0,
+      url: '',
+      error: '',
+      assetId: '',
+    };
+    state.mediaItems.push(item);
+    uploadMediaItem(item);
+  }
+
+  renderMediaQueue();
+  buildPreflight();
+}
+
+function setMediaItem(id, patch) {
+  const item = state.mediaItems.find(candidate => candidate.id === id);
+  if (!item) {
+    return null;
+  }
+  Object.assign(item, patch);
+  renderMediaQueue();
+  buildPreflight();
+  return item;
+}
+
+function uploadWithProgress(uploadUrl, file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.upload.addEventListener('progress', (event) => {
+      if (event.lengthComputable) {
+        onProgress(Math.round((event.loaded / event.total) * 100));
+      }
+    });
+    xhr.addEventListener('load', () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve();
+        return;
+      }
+      reject(new Error(`对象存储上传失败：${xhr.status || '未知状态'}`));
+    });
+    xhr.addEventListener('error', () => reject(new Error('对象存储上传失败：网络错误')));
+    xhr.open('PUT', uploadUrl);
+    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+    xhr.send(file);
+  });
+}
+
+async function uploadMediaItem(item) {
+  try {
+    setMediaItem(item.id, { status: 'uploading', progress: 3, error: '', url: '' });
+    const sign = await api('/api/assets/upload-sign', {
+      method: 'POST',
+      body: JSON.stringify({
+        filename: item.name,
+        size: item.size,
+        mediaKind: item.kind,
+      }),
+    });
+    if (!sign?.id || !sign?.uploadUrl) {
+      throw new Error('上传签名缺少 uploadUrl');
+    }
+
+    setMediaItem(item.id, { assetId: sign.id, progress: 8 });
+    await uploadWithProgress(sign.uploadUrl, item.file, (progress) => {
+      setMediaItem(item.id, { progress: Math.max(8, Math.min(96, progress)) });
+    });
+
+    setMediaItem(item.id, { status: 'confirming', progress: 98 });
+    const confirmed = await api(`/api/assets/${encodeURIComponent(sign.id)}/confirm`, {
+      method: 'POST',
+      body: JSON.stringify({ id: sign.id }),
+    });
+    const finalUrl = confirmed?.url || sign.url;
+    if (!isHttpsUrl(finalUrl)) {
+      throw new Error('上传完成但未返回 HTTPS URL');
+    }
+    if (setMediaItem(item.id, { status: 'success', progress: 100, url: finalUrl, error: '' })) {
+      showToast('素材上传完成。');
+    }
+  }
+  catch (error) {
+    if (setMediaItem(item.id, { status: 'error', error: error.message || '上传失败' })) {
+      showToast(error.message || '素材上传失败', 'danger');
+    }
+  }
+}
+
+function retryMediaItem(id) {
+  const item = state.mediaItems.find(candidate => candidate.id === id);
+  if (!item?.file) {
+    showToast('找不到可重试的本地文件。', 'danger');
+    return;
+  }
+  uploadMediaItem(item);
+}
+
+function removeMediaItem(id) {
+  state.mediaItems = state.mediaItems.filter(item => item.id !== id);
+  renderMediaQueue();
+  buildPreflight();
+}
+
+function clearMediaItems() {
+  state.mediaItems = [];
+  els.mediaInput.value = '';
+  renderMediaQueue();
+  buildPreflight();
 }
 
 function buildPreflight() {
@@ -294,6 +546,9 @@ function buildPreflight() {
   const title = els.titleInput.value.trim();
   const body = els.bodyInput.value.trim();
   const cover = els.coverInput.value.trim();
+  const uploadingCount = state.mediaItems.filter(item => ['uploading', 'confirming'].includes(item.status)).length;
+  const failedCount = state.mediaItems.filter(item => item.status === 'error').length;
+  const uploadedItems = state.mediaItems.filter(item => item.status === 'success');
   const issues = [];
 
   const checks = [
@@ -307,13 +562,37 @@ function buildPreflight() {
     },
     {
       ok: mediaUrls.length > 0,
-      text: mediaUrls.length > 0 ? `已填写 ${mediaUrls.length} 个素材 URL` : '至少填写一个公开视频或图片 URL',
+      text: mediaUrls.length > 0 ? `素材队列已有 ${mediaUrls.length} 个 HTTPS URL` : '至少上传一个素材或填写一个 HTTPS URL',
+    },
+    {
+      ok: uploadingCount === 0,
+      text: uploadingCount === 0 ? '没有正在上传的素材' : `还有 ${uploadingCount} 个素材正在上传`,
+    },
+    {
+      ok: state.mediaMode !== 'video' || mediaUrls.length <= 1,
+      text: state.mediaMode !== 'video' || mediaUrls.length <= 1 ? '素材数量符合当前模式' : '视频模式一次只允许 1 个素材',
+    },
+    {
+      ok: uploadedItems.every(item => state.mediaMode === 'video' ? item.kind === 'video' : item.kind === 'image'),
+      text: uploadedItems.every(item => state.mediaMode === 'video' ? item.kind === 'video' : item.kind === 'image')
+        ? '上传素材类型符合当前模式'
+        : state.mediaMode === 'video'
+          ? '视频模式只允许视频文件'
+          : '图文模式只允许图片文件',
     },
     {
       ok: mediaUrls.every(isHttpsUrl) && (!cover || isHttpsUrl(cover)),
       text: '素材和封面必须使用 HTTPS URL',
     },
   ];
+
+  if (failedCount > 0) {
+    checks.push({
+      ok: false,
+      warn: true,
+      text: `${failedCount} 个素材上传失败，可删除或重试`,
+    });
+  }
 
   for (const check of checks) {
     if (!check.ok) {
@@ -718,7 +997,7 @@ function startFlowPolling(flowId) {
 function clearForm() {
   els.titleInput.value = '';
   els.bodyInput.value = '';
-  els.mediaInput.value = '';
+  clearMediaItems();
   els.coverInput.value = '';
   state.selectedAccountIds.clear();
   setDefaultPublishTime();
@@ -731,6 +1010,51 @@ function bindEvents() {
   els.refreshButton.addEventListener('click', loadAll);
   els.publishForm.addEventListener('submit', submitPublish);
   els.clearButton.addEventListener('click', clearForm);
+  els.clearMediaButton.addEventListener('click', clearMediaItems);
+  els.chooseFileButton.addEventListener('click', () => els.fileInput.click());
+  els.dropZone.addEventListener('click', (event) => {
+    if (event.target.closest('button')) {
+      return;
+    }
+    els.fileInput.click();
+  });
+  els.dropZone.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      els.fileInput.click();
+    }
+  });
+  els.fileInput.addEventListener('change', () => {
+    addMediaFiles(els.fileInput.files || []);
+    els.fileInput.value = '';
+  });
+  for (const eventName of ['dragenter', 'dragover']) {
+    els.dropZone.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      els.dropZone.classList.add('is-dragover');
+    });
+  }
+  for (const eventName of ['dragleave', 'drop']) {
+    els.dropZone.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      els.dropZone.classList.remove('is-dragover');
+    });
+  }
+  els.dropZone.addEventListener('drop', (event) => {
+    addMediaFiles(event.dataTransfer?.files || []);
+  });
+  els.mediaQueue.addEventListener('click', (event) => {
+    const target = event.target.closest('[data-action]');
+    if (!target) {
+      return;
+    }
+    if (target.dataset.action === 'remove-media') {
+      removeMediaItem(target.dataset.mediaId);
+    }
+    if (target.dataset.action === 'retry-media') {
+      retryMediaItem(target.dataset.mediaId);
+    }
+  });
 
   els.viewTriggers.forEach((trigger) => {
     trigger.addEventListener('click', () => {
@@ -746,10 +1070,7 @@ function bindEvents() {
     button.addEventListener('click', () => {
       state.mediaMode = button.dataset.mediaMode;
       document.querySelectorAll('[data-media-mode]').forEach(item => item.classList.toggle('is-active', item === button));
-      els.mediaLabel.textContent = state.mediaMode === 'video' ? '视频 URL' : '图片 URL';
-      els.mediaInput.placeholder = state.mediaMode === 'video'
-        ? '每行一个公开视频 HTTPS URL。通常首版每次提交 1 个视频。'
-        : '每行一个公开图片 HTTPS URL。';
+      updateMediaModeUi();
       buildPreflight();
     });
   });
@@ -795,6 +1116,8 @@ function bindEvents() {
 }
 
 setDefaultPublishTime();
+updateMediaModeUi();
+renderMediaQueue();
 bindEvents();
 setActiveView('overview');
 buildPreflight();

@@ -12,6 +12,8 @@ WilleAI operators and creators who need to connect social accounts, prepare a po
 
 WilleAI Publish Studio is a focused publishing cockpit for the China environment. It should make the current publishing state obvious, keep account connection separate from content editing, and let users understand what blocks a publish before they submit.
 
+The content workspace supports local image/video upload and public HTTPS URL input. Local files are uploaded through the AiToEarn China asset service first, then the confirmed HTTPS URLs are used by the existing publishing flow.
+
 ## Brand Personality
 
 Precise, calm, operational.
@@ -26,6 +28,7 @@ Avoid marketing-page hero layouts, decorative dashboards, overloaded single-scre
 - Keep operational status visible without turning metrics into decoration.
 - Prefer familiar product UI patterns over experimental navigation.
 - Make blockers concrete and close to the action they affect.
+- Make local asset upload status explicit: filename, type, size, progress, final URL, and retryable errors.
 - Preserve fast keyboard and form workflows for repeated publishing.
 
 ## Accessibility & Inclusion

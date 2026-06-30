@@ -14,6 +14,7 @@ const baseUrl = normalizeBaseUrl(process.env.AITOEARN_BASE_URL || 'https://aitoe
 const apiKey = process.env.AITOEARN_API_KEY || '';
 const publicOrigin = normalizeBaseUrl(process.env.PUBLIC_ORIGIN || 'https://publish.willeai.cn');
 const requestTimeoutMs = Number(process.env.REQUEST_TIMEOUT_MS || 25000);
+const assetIdPattern = /^[A-Za-z0-9_-]{8,128}$/;
 
 const jsonHeaders = {
   'Content-Type': 'application/json; charset=utf-8',
@@ -326,6 +327,31 @@ function looksLikeVideoUrl(value) {
   return /\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(value);
 }
 
+function validateUploadSignPayload(body) {
+  const filename = typeof body.filename === 'string' ? body.filename.trim() : '';
+  const size = Number(body.size || 0);
+  const mediaKind = body.mediaKind === 'image' ? 'image' : body.mediaKind === 'video' ? 'video' : '';
+
+  if (!filename || filename.length > 240 || filename.includes('/') || filename.includes('\\')) {
+    throw Object.assign(new Error('文件名无效'), { statusCode: 400 });
+  }
+  if (!Number.isFinite(size) || size <= 0) {
+    throw Object.assign(new Error('文件大小无效'), { statusCode: 400 });
+  }
+  if (size > 1024 * 1024 * 1024) {
+    throw Object.assign(new Error('单个文件不能超过 1GB'), { statusCode: 400 });
+  }
+  if (!mediaKind) {
+    throw Object.assign(new Error('素材类型无效'), { statusCode: 400 });
+  }
+
+  return {
+    filename,
+    size,
+    type: 'userMedia',
+  };
+}
+
 function getAuthRedirectUri() {
   return `${publicOrigin}/auth/callback`;
 }
@@ -351,6 +377,32 @@ async function handleApi(req, res, url) {
     if (url.pathname === '/api/accounts' && req.method === 'GET') {
       const result = await upstream(req, '/v2/channels/accounts');
       ok(res, normalizeAccounts(result.data));
+      return;
+    }
+
+    if (url.pathname === '/api/assets/upload-sign' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const payload = validateUploadSignPayload(body);
+      const result = await upstream(req, '/assets/uploadSign', {
+        method: 'POST',
+        body: payload,
+      });
+      ok(res, result.data);
+      return;
+    }
+
+    const assetConfirmMatch = url.pathname.match(/^\/api\/assets\/([^/]+)\/confirm$/);
+    if (assetConfirmMatch && req.method === 'POST') {
+      const assetId = decodeURIComponent(assetConfirmMatch[1]);
+      if (!assetIdPattern.test(assetId)) {
+        fail(res, 400, '资产 ID 无效');
+        return;
+      }
+      const result = await upstream(req, `/assets/${encodeURIComponent(assetId)}/confirm`, {
+        method: 'POST',
+        body: { id: assetId },
+      });
+      ok(res, result.data);
       return;
     }
 

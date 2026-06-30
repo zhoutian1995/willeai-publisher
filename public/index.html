@@ -6,7 +6,7 @@
     <title>WilleAI Publish Studio</title>
     <meta name="description" content="WilleAI 跨平台内容发布工作台" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=20260630-views1" />
+    <link rel="stylesheet" href="/styles.css?v=20260630-assets1" />
   </head>
   <body>
     <div class="app-shell">
@@ -132,10 +132,33 @@
                   <span>正文</span>
                   <textarea id="bodyInput" rows="8" placeholder="填写正文、话题、说明。平台限制会在预检区提示。"></textarea>
                 </label>
-                <label class="field">
-                  <span id="mediaLabel">视频 URL</span>
-                  <textarea id="mediaInput" rows="4" placeholder="每行一个公开视频或图片 HTTPS URL"></textarea>
-                </label>
+                <section class="media-workspace" aria-labelledby="mediaLabel">
+                  <div class="media-workspace-head">
+                    <div>
+                      <span id="mediaLabel" class="field-title">视频素材</span>
+                      <p id="mediaHelp">拖拽或选择本地视频，上传成功后会自动加入素材队列。</p>
+                    </div>
+                    <button class="small-button" id="clearMediaButton" type="button">清空素材</button>
+                  </div>
+
+                  <div class="drop-zone" id="dropZone" tabindex="0" role="button" aria-describedby="mediaHelp">
+                    <input id="fileInput" class="visually-hidden" type="file" accept="video/*" />
+                    <div class="drop-zone-copy">
+                      <strong>选择文件或拖到这里</strong>
+                      <span id="dropZoneHint">视频模式一次只接受 1 个视频文件。</span>
+                    </div>
+                    <button class="secondary-button" id="chooseFileButton" type="button">选择文件</button>
+                  </div>
+
+                  <div class="media-queue" id="mediaQueue" aria-live="polite">
+                    <p class="media-empty">素材队列为空。上传文件或粘贴 HTTPS URL 后会显示在这里。</p>
+                  </div>
+
+                  <label class="field media-url-field">
+                    <span>手动 HTTPS URL</span>
+                    <textarea id="mediaInput" rows="4" placeholder="每行一个公开视频 HTTPS URL，可作为上传备用入口"></textarea>
+                  </label>
+                </section>
                 <div class="inline-fields">
                   <label class="field">
                     <span>封面 URL</span>
@@ -216,6 +239,6 @@
     </div>
 
     <div class="toast-region" id="toastRegion" aria-live="polite"></div>
-    <script src="/app.js?v=20260630-views1" type="module"></script>
+    <script src="/app.js?v=20260630-assets1" type="module"></script>
   </body>
 </html>

@@ -8,10 +8,12 @@
 - 获取账号列表：`GET v2/channels/accounts`
 - 发起账号授权：`GET v2/channels/accounts/auth/:platform`
 - 查询授权状态：`GET v2/channels/accounts/auth/:platform/status/:sessionId`
+- 获取资产上传签名：`POST assets/uploadSign`
+- 确认资产上传：`POST assets/:assetId/confirm`
 - 创建发布 Flow：`POST v2/channels/publish/flows`
 - 查询发布 Flow：`GET v2/channels/publish/flows/:flowId`
 
-v1 只接受公网 HTTPS 素材 URL，不做文件上传。发布前必须选择至少一个已连接账号。
+内容页支持本地素材上传和手动 HTTPS URL 两种入口。浏览器先通过本服务获取上传签名，再把文件直传到对象存储，确认成功后把最终 HTTPS URL 写入素材队列并参与预检和发布。视频模式一次提交 1 个视频素材；图文模式支持多张图片。发布前必须选择至少一个已连接账号。
 
 ## 本地运行
 
