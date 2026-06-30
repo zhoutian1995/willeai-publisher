@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WilleAI Publish Studio</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">WilleAI 工作室制作</p>
+          <h1>WilleAI Publish Studio</h1>
+        </div>
+        <div class="topbar-status" aria-live="polite">
+          <span class="status-pill" id="environmentStatus">
+            <span class="status-dot"></span>
+            环境检查中
+          </span>
+          <button class="icon-button" id="refreshButton" type="button" title="刷新状态" aria-label="刷新状态">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M21 12a9 9 0 0 1-15.4 6.4M3 12A9 9 0 0 1 18.4 5.6M18 2v4h-4M6 22v-4h4" />
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="panel accounts-panel" aria-labelledby="accountsTitle">
+          <div class="panel-header">
+            <div>
+              <p class="section-kicker">账号矩阵</p>
+              <h2 id="accountsTitle">发布账号</h2>
+            </div>
+            <span class="meta" id="accountCount">0 个账号</span>
+          </div>
+          <div class="platform-grid" id="platformGrid"></div>
+        </section>
+
+        <section class="panel editor-panel" aria-labelledby="editorTitle">
+          <div class="panel-header">
+            <div>
+              <p class="section-kicker">内容输入</p>
+              <h2 id="editorTitle">准备发布</h2>
+            </div>
+            <div class="segmented" role="group" aria-label="素材类型">
+              <button type="button" class="segment is-active" data-media-mode="video">视频</button>
+              <button type="button" class="segment" data-media-mode="images">图文</button>
+            </div>
+          </div>
+
+          <form id="publishForm" class="publish-form">
+            <label class="field">
+              <span>标题</span>
+              <input id="titleInput" type="text" maxlength="120" placeholder="填写要同步到各平台的标题" />
+            </label>
+            <label class="field">
+              <span>正文</span>
+              <textarea id="bodyInput" rows="8" placeholder="填写正文、话题、说明。平台限制会在预检区提示。"></textarea>
+            </label>
+            <label class="field">
+              <span id="mediaLabel">视频 URL</span>
+              <textarea id="mediaInput" rows="4" placeholder="每行一个公开视频或图片 HTTPS URL"></textarea>
+            </label>
+            <div class="inline-fields">
+              <label class="field">
+                <span>封面 URL</span>
+                <input id="coverInput" type="url" placeholder="可选，HTTPS URL" />
+              </label>
+              <label class="field">
+                <span>发布时间</span>
+                <input id="publishAtInput" type="datetime-local" />
+              </label>
+            </div>
+            <div class="action-row">
+              <button class="primary-button" id="publishButton" type="submit">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="m22 2-7 20-4-9-9-4Z" />
+                  <path d="M22 2 11 13" />
+                </svg>
+                一键发布
+              </button>
+              <button class="secondary-button" id="clearButton" type="button">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M3 6h18" />
+                  <path d="M8 6V4h8v2" />
+                  <path d="m19 6-1 14H6L5 6" />
+                </svg>
+                清空
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel result-panel" aria-labelledby="resultTitle">
+          <div class="panel-header">
+            <div>
+              <p class="section-kicker">预检与结果</p>
+              <h2 id="resultTitle">发布流</h2>
+            </div>
+            <span class="meta" id="flowMeta">未提交</span>
+          </div>
+
+          <div class="preflight" id="preflightList" aria-live="polite"></div>
+          <div class="flow-box" id="flowBox">
+            <p class="empty-state">选择账号并填写 HTTPS 素材 URL 后，预检和发布结果会显示在这里。</p>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="toast-region" id="toastRegion" aria-live="polite"></div>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

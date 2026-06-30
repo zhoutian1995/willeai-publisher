@@ -1,0 +1,131 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: willeai-publisher-production
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Syntax check
+        run: |
+          node --check server.js
+          node --check public/app.js
+
+  deploy:
+    name: Deploy to publish.willeai.cn
+    needs: verify
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    env:
+      SERVER_HOST: 47.100.247.237
+      SERVER_USER: root
+      DEPLOY_PATH: /home/admin/project/willeai-publisher
+      PORT: '3200'
+      HOST: 127.0.0.1
+      AITOEARN_BASE_URL: https://aitoearn.cn
+      AITOEARN_API_KEY: ${{ secrets.AITOEARN_API_KEY }}
+      PUBLIC_ORIGIN: https://publish.willeai.cn
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          test -n "$SERVER_HOST"
+          test -n "$SERVER_USER"
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$SERVER_HOST" >> ~/.ssh/known_hosts
+
+      - name: Upload application
+        run: |
+          ssh -i ~/.ssh/deploy_key "$SERVER_USER@$SERVER_HOST" "mkdir -p '$DEPLOY_PATH'"
+          rsync -az --delete \
+            --exclude='.git' \
+            --exclude='.env' \
+            -e "ssh -i ~/.ssh/deploy_key" \
+            ./ "$SERVER_USER@$SERVER_HOST:$DEPLOY_PATH/"
+
+      - name: Configure and restart
+        run: |
+          ssh -i ~/.ssh/deploy_key "$SERVER_USER@$SERVER_HOST" \
+            "DEPLOY_PATH='$DEPLOY_PATH' PORT='$PORT' HOST='$HOST' AITOEARN_BASE_URL='$AITOEARN_BASE_URL' AITOEARN_API_KEY='$AITOEARN_API_KEY' PUBLIC_ORIGIN='$PUBLIC_ORIGIN' bash -s" <<'REMOTE'
+          set -euo pipefail
+
+          cd "$DEPLOY_PATH"
+
+          cat > .env <<ENV
+          PORT=$PORT
+          HOST=$HOST
+          AITOEARN_BASE_URL=$AITOEARN_BASE_URL
+          AITOEARN_API_KEY=$AITOEARN_API_KEY
+          PUBLIC_ORIGIN=$PUBLIC_ORIGIN
+          ENV
+
+          node --check server.js
+          node --check public/app.js
+
+          if pm2 describe willeai-publisher >/dev/null 2>&1; then
+            pm2 reload willeai-publisher --update-env
+          else
+            pm2 start scripts/ecosystem.config.cjs --only willeai-publisher
+          fi
+          pm2 save
+
+          cat > /www/server/panel/vhost/nginx/publish.willeai.cn.conf <<'NGINX'
+          server {
+              listen 80;
+              listen 443 ssl;
+              http2 on;
+              server_name publish.willeai.cn;
+
+              ssl_certificate /www/server/panel/vhost/cert/willeai.cn/fullchain.pem;
+              ssl_certificate_key /www/server/panel/vhost/cert/willeai.cn/privkey.pem;
+              ssl_protocols TLSv1.2 TLSv1.3;
+              ssl_ciphers HIGH:!aNULL:!MD5;
+
+              access_log /www/wwwlogs/publish.willeai.cn.log;
+              error_log /www/wwwlogs/publish.willeai.cn.error.log;
+
+              if ($server_port = 80) {
+                  return 301 https://$host$request_uri;
+              }
+
+              location / {
+                  proxy_pass http://127.0.0.1:3200;
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection 'upgrade';
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+                  proxy_cache_bypass $http_upgrade;
+                  proxy_read_timeout 300s;
+                  proxy_connect_timeout 75s;
+              }
+          }
+          NGINX
+
+          nginx -t
+          nginx -s reload
+          REMOTE

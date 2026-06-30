@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>授权已返回</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f7f4;
+        --text: #20231f;
+        --muted: #6b7069;
+        --line: #dfe3dc;
+        --ok: #0f7a45;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        background: var(--bg);
+        color: var(--text);
+        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      main {
+        width: min(100%, 460px);
+        border: 1px solid var(--line);
+        background: #fff;
+        border-radius: 8px;
+        padding: 28px;
+        box-shadow: 0 16px 50px rgba(30, 40, 30, 0.08);
+      }
+
+      .mark {
+        width: 40px;
+        height: 40px;
+        display: grid;
+        place-items: center;
+        border-radius: 50%;
+        color: #fff;
+        background: var(--ok);
+        margin-bottom: 18px;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 22px;
+        line-height: 1.25;
+      }
+
+      p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.7;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="mark">✓</div>
+      <h1>授权流程已返回 Publish Studio</h1>
+      <p>请回到发布工作台查看账号连接状态。此页面稍后会尝试自动关闭。</p>
+    </main>
+    <script>
+      try {
+        if (window.opener) {
+          window.opener.postMessage({ type: 'willeai-auth-returned' }, window.location.origin);
+        }
+      }
+      catch {}
+      setTimeout(() => window.close(), 1600);
+    </script>
+  </body>
+</html>
