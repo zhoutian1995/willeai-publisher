@@ -6,7 +6,7 @@
     <title>WilleAI Publish Studio</title>
     <meta name="description" content="WilleAI 跨平台内容发布工作台" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=20260630-tight2" />
+    <link rel="stylesheet" href="/styles.css?v=20260630-views1" />
   </head>
   <body>
     <div class="app-shell">
@@ -19,10 +19,11 @@
           </span>
         </div>
 
-        <nav class="top-nav" aria-label="发布流程">
-          <a class="top-nav-link is-active" href="#editorTitle">内容</a>
-          <a class="top-nav-link" href="#accountsTitle">账号</a>
-          <a class="top-nav-link" href="#resultTitle">预检</a>
+        <nav class="top-nav" aria-label="工作区视图">
+          <button class="top-nav-link is-active" type="button" data-view-target="overview">总览</button>
+          <button class="top-nav-link" type="button" data-view-target="accounts">账号</button>
+          <button class="top-nav-link" type="button" data-view-target="compose">内容</button>
+          <button class="top-nav-link" type="button" data-view-target="publish">发布</button>
         </nav>
 
         <div class="topbar-status" aria-live="polite">
@@ -38,122 +39,183 @@
         </div>
       </header>
 
-      <section class="studio-intro" aria-label="工作台概览">
-        <div class="title-block">
-          <p class="eyebrow">publish.willeai.cn</p>
-          <h1>发布工作台</h1>
-        </div>
-        <div class="command-center" aria-label="发布工作台状态">
-          <div class="metric-tile">
-            <span>可用账号</span>
-            <strong id="connectedMetric">0</strong>
+      <main class="view-shell">
+        <section class="view-panel is-active" data-view="overview" aria-labelledby="overviewTitle">
+          <div class="hero-panel">
+            <div class="hero-copy">
+              <p class="eyebrow">publish.willeai.cn</p>
+              <h1 id="overviewTitle">发布工作台</h1>
+              <p>把账号、内容、预检和发布结果拆成独立工作区。先看状态，再进入当前要处理的环节。</p>
+            </div>
+            <div class="pipeline-strip overview-pipeline" aria-label="发布阶段">
+              <span class="pipeline-step" id="pipelineStepAccounts">账号</span>
+              <span class="pipeline-step" id="pipelineStepContent">内容</span>
+              <span class="pipeline-step" id="pipelineStepPreflight">预检</span>
+              <span class="pipeline-step" id="pipelineStepSubmit">发布</span>
+            </div>
           </div>
-          <div class="metric-tile">
-            <span>已选目标</span>
-            <strong id="selectedMetric">0</strong>
-          </div>
-          <div class="metric-tile">
-            <span>素材队列</span>
-            <strong id="mediaMetric">0</strong>
-          </div>
-          <div class="metric-tile is-wide">
-            <span>预检状态</span>
-            <strong id="preflightMetric">待填写</strong>
-          </div>
-        </div>
-      </section>
 
-      <main class="workspace">
-        <section class="panel accounts-panel" aria-labelledby="accountsTitle">
-          <div class="panel-header">
+          <div class="status-grid" aria-label="发布工作台状态">
+            <button class="metric-tile metric-button" type="button" data-view-target="accounts">
+              <span>可用账号</span>
+              <strong id="connectedMetric">0</strong>
+            </button>
+            <button class="metric-tile metric-button" type="button" data-view-target="accounts">
+              <span>已选目标</span>
+              <strong id="selectedMetric">0</strong>
+            </button>
+            <button class="metric-tile metric-button" type="button" data-view-target="compose">
+              <span>素材队列</span>
+              <strong id="mediaMetric">0</strong>
+            </button>
+            <button class="metric-tile metric-button is-wide" type="button" data-view-target="publish">
+              <span>预检状态</span>
+              <strong id="preflightMetric">待填写</strong>
+            </button>
+          </div>
+
+          <div class="overview-grid">
+            <article class="overview-card">
+              <span class="card-index">1</span>
+              <h2>连接账号</h2>
+              <p>授权平台账号，选择这次要发布的目标。</p>
+              <button class="text-button" type="button" data-view-target="accounts">进入账号</button>
+            </article>
+            <article class="overview-card">
+              <span class="card-index">2</span>
+              <h2>准备内容</h2>
+              <p>填写标题、正文、素材 URL 和计划发布时间。</p>
+              <button class="text-button" type="button" data-view-target="compose">编辑内容</button>
+            </article>
+            <article class="overview-card">
+              <span class="card-index">3</span>
+              <h2>检查并发布</h2>
+              <p>修正预检阻塞项，提交后在这里追踪平台任务。</p>
+              <button class="text-button" type="button" data-view-target="publish">查看发布</button>
+            </article>
+          </div>
+        </section>
+
+        <section class="view-panel" data-view="accounts" aria-labelledby="accountsTitle">
+          <div class="section-head">
             <div>
               <p class="section-kicker">账号</p>
               <h2 id="accountsTitle">发布目标</h2>
+              <p>先连接平台账号，再选择本次要同步发布的目标。</p>
             </div>
             <span class="meta" id="accountCount">0 个账号</span>
           </div>
           <div class="platform-grid" id="platformGrid"></div>
         </section>
 
-        <section class="panel editor-panel" aria-labelledby="editorTitle">
-          <div class="panel-header editor-toolbar">
-            <div>
-              <p class="section-kicker">内容</p>
-              <h2 id="editorTitle">准备发布</h2>
-            </div>
-            <div class="segmented" role="group" aria-label="素材类型">
-              <button type="button" class="segment is-active" data-media-mode="video">视频</button>
-              <button type="button" class="segment" data-media-mode="images">图文</button>
-            </div>
-          </div>
+        <section class="view-panel" data-view="compose" aria-labelledby="editorTitle">
+          <form id="publishForm" class="compose-layout">
+            <section class="compose-main" aria-labelledby="editorTitle">
+              <div class="section-head editor-toolbar">
+                <div>
+                  <p class="section-kicker">内容</p>
+                  <h2 id="editorTitle">准备发布</h2>
+                  <p>内容输入和素材管理放在一个宽工作区里，减少在窄栏里编辑长文。</p>
+                </div>
+                <div class="segmented" role="group" aria-label="素材类型">
+                  <button type="button" class="segment is-active" data-media-mode="video">视频</button>
+                  <button type="button" class="segment" data-media-mode="images">图文</button>
+                </div>
+              </div>
 
-          <form id="publishForm" class="publish-form">
-            <label class="field title-field">
-              <span>标题</span>
-              <input id="titleInput" type="text" maxlength="120" placeholder="填写要同步到各平台的标题" />
-            </label>
-            <label class="field">
-              <span>正文</span>
-              <textarea id="bodyInput" rows="8" placeholder="填写正文、话题、说明。平台限制会在预检区提示。"></textarea>
-            </label>
-            <label class="field">
-              <span id="mediaLabel">视频 URL</span>
-              <textarea id="mediaInput" rows="4" placeholder="每行一个公开视频或图片 HTTPS URL"></textarea>
-            </label>
-            <div class="inline-fields">
-              <label class="field">
-                <span>封面 URL</span>
-                <input id="coverInput" type="url" placeholder="可选，HTTPS URL" />
-              </label>
-              <label class="field">
-                <span>发布时间</span>
-                <input id="publishAtInput" type="datetime-local" />
-              </label>
-            </div>
-            <div class="action-row">
-              <button class="primary-button" id="publishButton" type="submit">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="m22 2-7 20-4-9-9-4Z" />
-                  <path d="M22 2 11 13" />
-                </svg>
-                一键发布
-              </button>
-              <button class="secondary-button" id="clearButton" type="button">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M3 6h18" />
-                  <path d="M8 6V4h8v2" />
-                  <path d="m19 6-1 14H6L5 6" />
-                </svg>
-                清空
-              </button>
-            </div>
+              <div class="publish-form">
+                <label class="field title-field">
+                  <span>标题</span>
+                  <input id="titleInput" type="text" maxlength="120" placeholder="填写要同步到各平台的标题" />
+                </label>
+                <label class="field">
+                  <span>正文</span>
+                  <textarea id="bodyInput" rows="8" placeholder="填写正文、话题、说明。平台限制会在预检区提示。"></textarea>
+                </label>
+                <label class="field">
+                  <span id="mediaLabel">视频 URL</span>
+                  <textarea id="mediaInput" rows="4" placeholder="每行一个公开视频或图片 HTTPS URL"></textarea>
+                </label>
+                <div class="inline-fields">
+                  <label class="field">
+                    <span>封面 URL</span>
+                    <input id="coverInput" type="url" placeholder="可选，HTTPS URL" />
+                  </label>
+                  <label class="field">
+                    <span>发布时间</span>
+                    <input id="publishAtInput" type="datetime-local" />
+                  </label>
+                </div>
+              </div>
+            </section>
+
+            <aside class="compose-aside" aria-label="发布操作">
+              <div class="aside-box">
+                <p class="section-kicker">下一步</p>
+                <h2>提交前检查</h2>
+                <p>保存当前输入后到发布页查看预检结果。所有必填项通过后即可提交。</p>
+                <div class="action-row vertical-actions">
+                  <button class="primary-button" id="publishButton" type="submit">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="m22 2-7 20-4-9-9-4Z" />
+                      <path d="M22 2 11 13" />
+                    </svg>
+                    一键发布
+                  </button>
+                  <button class="secondary-button" type="button" data-view-target="publish">查看预检</button>
+                  <button class="secondary-button" id="clearButton" type="button">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M3 6h18" />
+                      <path d="M8 6V4h8v2" />
+                      <path d="m19 6-1 14H6L5 6" />
+                    </svg>
+                    清空
+                  </button>
+                </div>
+              </div>
+            </aside>
           </form>
         </section>
 
-        <section class="panel result-panel" aria-labelledby="resultTitle">
-          <div class="panel-header">
-            <div>
-              <p class="section-kicker">预检</p>
-              <h2 id="resultTitle">发布流</h2>
-            </div>
-            <span class="meta" id="flowMeta">未提交</span>
-          </div>
+        <section class="view-panel" data-view="publish" aria-labelledby="resultTitle">
+          <div class="publish-layout">
+            <section class="publish-checks">
+              <div class="section-head">
+                <div>
+                  <p class="section-kicker">预检</p>
+                  <h2 id="resultTitle">发布检查</h2>
+                  <p>这里集中展示阻塞项和当前发布阶段，不占用内容编辑区。</p>
+                </div>
+                <span class="meta" id="flowMeta">未提交</span>
+              </div>
 
-          <div class="pipeline-strip" aria-label="发布阶段">
-            <span class="pipeline-step" id="pipelineStepAccounts">账号</span>
-            <span class="pipeline-step" id="pipelineStepContent">内容</span>
-            <span class="pipeline-step" id="pipelineStepPreflight">预检</span>
-            <span class="pipeline-step" id="pipelineStepSubmit">发布</span>
-          </div>
-          <div class="preflight" id="preflightList" aria-live="polite"></div>
-          <div class="flow-box" id="flowBox">
-            <p class="empty-state">选择账号并填写 HTTPS 素材 URL 后，预检和发布结果会显示在这里。</p>
+              <div class="pipeline-strip" aria-label="发布阶段">
+                <span class="pipeline-step" data-pipeline-proxy="accounts">账号</span>
+                <span class="pipeline-step" data-pipeline-proxy="content">内容</span>
+                <span class="pipeline-step" data-pipeline-proxy="preflight">预检</span>
+                <span class="pipeline-step" data-pipeline-proxy="submit">发布</span>
+              </div>
+              <div class="preflight" id="preflightList" aria-live="polite"></div>
+            </section>
+
+            <section class="publish-results" aria-labelledby="flowTitle">
+              <div class="section-head compact-head">
+                <div>
+                  <p class="section-kicker">结果</p>
+                  <h2 id="flowTitle">发布流</h2>
+                </div>
+              </div>
+              <div class="flow-box" id="flowBox">
+                <p class="empty-state">选择账号并填写 HTTPS 素材 URL 后，预检和发布结果会显示在这里。</p>
+              </div>
+            </section>
           </div>
         </section>
       </main>
+
     </div>
 
     <div class="toast-region" id="toastRegion" aria-live="polite"></div>
-    <script src="/app.js?v=20260630-tight2" type="module"></script>
+    <script src="/app.js?v=20260630-views1" type="module"></script>
   </body>
 </html>

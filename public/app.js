@@ -54,6 +54,9 @@ const els = {
   pipelineStepContent: document.querySelector('#pipelineStepContent'),
   pipelineStepPreflight: document.querySelector('#pipelineStepPreflight'),
   pipelineStepSubmit: document.querySelector('#pipelineStepSubmit'),
+  viewPanels: document.querySelectorAll('[data-view]'),
+  viewTriggers: document.querySelectorAll('[data-view-target]'),
+  pipelineProxies: document.querySelectorAll('[data-pipeline-proxy]'),
 };
 
 function escapeHtml(value) {
@@ -380,6 +383,37 @@ function updateOverview(preflight) {
     element.classList.toggle('is-complete', complete);
     element.classList.toggle('is-active', index === activeIndex);
   }
+
+  const proxySteps = [
+    ['accounts', hasAccounts],
+    ['content', hasContent],
+    ['preflight', isReady],
+    ['submit', Boolean(state.activeFlowId)],
+  ];
+  const proxyActiveIndex = proxySteps.findIndex(([, complete]) => !complete);
+  els.pipelineProxies.forEach((element) => {
+    const index = proxySteps.findIndex(([name]) => name === element.dataset.pipelineProxy);
+    const complete = proxySteps[index]?.[1] || false;
+    element.classList.toggle('is-complete', complete);
+    element.classList.toggle('is-active', index === proxyActiveIndex);
+  });
+}
+
+function setActiveView(viewName) {
+  const nextView = [...els.viewPanels].some(panel => panel.dataset.view === viewName)
+    ? viewName
+    : 'overview';
+
+  els.viewPanels.forEach((panel) => {
+    panel.classList.toggle('is-active', panel.dataset.view === nextView);
+  });
+  els.viewTriggers.forEach((trigger) => {
+    const isActive = trigger.dataset.viewTarget === nextView;
+    trigger.classList.toggle('is-active', isActive);
+    if (trigger.classList.contains('top-nav-link')) {
+      trigger.setAttribute('aria-current', isActive ? 'page' : 'false');
+    }
+  });
 }
 
 function renderFlow(flow) {
@@ -642,6 +676,7 @@ async function submitPublish(event) {
     });
     state.activeFlowId = flow.flowId;
     renderFlow(flow);
+    setActiveView('publish');
     showToast('发布 Flow 已提交。');
     startFlowPolling(flow.flowId);
   }
@@ -696,6 +731,12 @@ function bindEvents() {
   els.refreshButton.addEventListener('click', loadAll);
   els.publishForm.addEventListener('submit', submitPublish);
   els.clearButton.addEventListener('click', clearForm);
+
+  els.viewTriggers.forEach((trigger) => {
+    trigger.addEventListener('click', () => {
+      setActiveView(trigger.dataset.viewTarget);
+    });
+  });
 
   for (const input of [els.titleInput, els.bodyInput, els.mediaInput, els.coverInput, els.publishAtInput]) {
     input.addEventListener('input', buildPreflight);
@@ -755,5 +796,6 @@ function bindEvents() {
 
 setDefaultPublishTime();
 bindEvents();
+setActiveView('overview');
 buildPreflight();
 loadAll();
