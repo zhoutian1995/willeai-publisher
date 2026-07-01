@@ -19,6 +19,8 @@ const platformNames = new Map([
 ]);
 
 const selectedAccountsStorageKey = 'willeai.publisher.selectedAccounts.v1';
+const recentFlowStorageKey = 'willeai.publisher.recentFlowId.v1';
+const historyPollIntervalMs = 7000;
 const contentKindLabels = new Map([
   ['video', '视频'],
   ['article', '长文章'],
@@ -141,8 +143,13 @@ const state = {
   browserTargetIds: new Set(),
   nextMediaId: 1,
   activeFlowId: '',
+  highlightedFlowId: '',
   activeHandoff: null,
   activeHandoffDelivery: null,
+  publishHistory: [],
+  publishHistoryError: '',
+  historyLoading: false,
+  historyTimer: null,
   flowTimer: null,
   accountRefreshTimer: null,
 };
@@ -183,6 +190,9 @@ const els = {
   selectedTargetsSummary: document.querySelector('#selectedTargetsSummary'),
   flowBox: document.querySelector('#flowBox'),
   flowMeta: document.querySelector('#flowMeta'),
+  publishHistoryBox: document.querySelector('#publishHistoryBox'),
+  publishHistoryMeta: document.querySelector('#publishHistoryMeta'),
+  refreshHistoryButton: document.querySelector('#refreshHistoryButton'),
   toastRegion: document.querySelector('#toastRegion'),
   connectedMetric: document.querySelector('#connectedMetric'),
   selectedMetric: document.querySelector('#selectedMetric'),
@@ -1950,6 +1960,103 @@ function isWaitingUserAction(task) {
   return ['8', 'waiting_user_action', 'waitingforuseraction'].includes(value);
 }
 
+function isFinalPublishStatus(status) {
+  const value = String(status ?? '').toLowerCase();
+  return ['1', '-1', '5', '9', 'published', 'success', 'completed', 'done', 'failed', 'error', 'updatedfailed', 'update_failed', 'canceled', 'cancelled'].includes(value);
+}
+
+function normalizePublishRecords(data) {
+  if (Array.isArray(data)) {
+    return data;
+  }
+  if (!data || typeof data !== 'object') {
+    return [];
+  }
+  for (const key of ['records', 'list', 'items', 'rows']) {
+    if (Array.isArray(data[key])) {
+      return data[key];
+    }
+  }
+  return [];
+}
+
+function recordId(record) {
+  return String(record?.id || record?._id || record?.taskId || '');
+}
+
+function recordPlatform(record) {
+  return record?.accountType || record?.platform || record?.type || '';
+}
+
+function recordTitle(record) {
+  return record?.title || record?.content?.title || '';
+}
+
+function recordBody(record) {
+  return record?.desc || record?.body || record?.content?.body || '';
+}
+
+function recordWorkLink(record) {
+  return record?.workLink || record?.link || record?.url || '';
+}
+
+function recordErrorMessage(record) {
+  const structuredMessage = record?.errorData?.message || record?.linkError || record?.errorMsg || record?.errorMessage || record?.message || '';
+  return typeof structuredMessage === 'string' ? structuredMessage : JSON.stringify(structuredMessage);
+}
+
+function recordPublishTime(record) {
+  return record?.publishTime || record?.createdAt || record?.updatedAt || '';
+}
+
+function formatDisplayDate(value) {
+  if (!value) {
+    return '时间未知';
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+}
+
+function textSummary(value, maxLength = 120) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!text) {
+    return '';
+  }
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+}
+
+function persistRecentFlowId(flowId) {
+  state.highlightedFlowId = flowId || '';
+  try {
+    if (flowId) {
+      window.localStorage.setItem(recentFlowStorageKey, flowId);
+    }
+    else {
+      window.localStorage.removeItem(recentFlowStorageKey);
+    }
+  }
+  catch {
+    // localStorage is only used for visual focus; publish history still comes from the database.
+  }
+}
+
+function restoreRecentFlowId() {
+  try {
+    state.highlightedFlowId = window.localStorage.getItem(recentFlowStorageKey) || '';
+  }
+  catch {
+    state.highlightedFlowId = '';
+  }
+}
+
 function renderTaskDetail(task) {
   if (task.errorMsg) {
     return `错误：${escapeHtml(task.errorMsg)}`;
@@ -1999,21 +2106,172 @@ function normalizeTaskStatus(status) {
   if (['6', '7', 'queued', 'platformscheduled', 'scheduled'].includes(value)) {
     return { label: '已排队', tone: 'warn' };
   }
-  if (['2', 'publishing', 'processing', 'pending', '0', ''].includes(value)) {
+  if (['9', 'canceled', 'cancelled'].includes(value)) {
+    return { label: '已取消', tone: 'danger' };
+  }
+  if (['3', 'waitingforupdate', 'waiting_update'].includes(value)) {
+    return { label: '待更新', tone: 'warn' };
+  }
+  if (['4', 'updating'].includes(value)) {
+    return { label: '更新中', tone: 'warn' };
+  }
+  if (['5', 'updatedfailed', 'update_failed'].includes(value)) {
+    return { label: '更新失败', tone: 'danger' };
+  }
+  if (['2', 'publishing', 'processing', 'pending', '0', 'waitingforpublish', ''].includes(value)) {
     return { label: '处理中', tone: 'warn' };
   }
   return { label: `状态 ${status}`, tone: 'warn' };
 }
 
+function renderPublishHistory() {
+  if (!els.publishHistoryBox) {
+    return;
+  }
+
+  if (els.publishHistoryMeta) {
+    els.publishHistoryMeta.textContent = state.historyLoading
+      ? '刷新中'
+      : state.publishHistory.length > 0
+        ? `${state.publishHistory.length} 条`
+        : '暂无记录';
+  }
+  if (els.refreshHistoryButton) {
+    els.refreshHistoryButton.disabled = state.historyLoading;
+  }
+
+  if (state.publishHistoryError) {
+    els.publishHistoryBox.innerHTML = `
+      <p class="empty-state is-danger">历史发布记录加载失败：${escapeHtml(state.publishHistoryError)}</p>
+    `;
+    return;
+  }
+
+  if (state.historyLoading && state.publishHistory.length === 0) {
+    els.publishHistoryBox.innerHTML = '<p class="empty-state">正在读取数据库发布记录...</p>';
+    return;
+  }
+
+  if (state.publishHistory.length === 0) {
+    els.publishHistoryBox.innerHTML = '<p class="empty-state">暂无历史发布记录。提交任务后，这里会从数据库恢复状态。</p>';
+    return;
+  }
+
+  els.publishHistoryBox.innerHTML = `
+    <div class="history-list">
+      ${state.publishHistory.map(renderPublishHistoryRecord).join('')}
+    </div>
+  `;
+}
+
+function renderPublishHistoryRecord(record) {
+  const id = recordId(record);
+  const platform = recordPlatform(record);
+  const status = normalizeTaskStatus(record?.status);
+  const title = recordTitle(record);
+  const body = recordBody(record);
+  const summary = textSummary(body || title || record?.videoUrl || (Array.isArray(record?.imgUrlList) ? record.imgUrlList[0] : ''));
+  const workLink = recordWorkLink(record);
+  const errorMessage = recordErrorMessage(record);
+  const isHighlighted = state.highlightedFlowId && record?.flowId === state.highlightedFlowId;
+  const action = isWaitingUserAction(record) && platform === 'douyin'
+    ? renderHistoryUserAction(record)
+    : '';
+
+  return `
+    <article class="history-row${isHighlighted ? ' is-highlighted' : ''}">
+      <div class="history-top">
+        <div class="history-title-block">
+          <span class="history-platform">${escapeHtml(platformNames.get(platform) || platform || '未知平台')}</span>
+          <strong>${escapeHtml(title || '未命名发布')}</strong>
+        </div>
+        <span class="mini-pill is-${status.tone}">${escapeHtml(status.label)}</span>
+      </div>
+      ${summary ? `<p class="history-summary">${escapeHtml(summary)}</p>` : ''}
+      <div class="history-meta">
+        <span>${escapeHtml(formatDisplayDate(recordPublishTime(record)))}</span>
+        ${record?.flowId ? `<span>Flow ${escapeHtml(record.flowId)}</span>` : ''}
+        ${id ? `<span>记录 ${escapeHtml(id)}</span>` : ''}
+      </div>
+      ${errorMessage ? `<p class="history-error">错误：${escapeHtml(errorMessage)}</p>` : ''}
+      ${workLink ? `<a class="history-link" href="${escapeHtml(workLink)}" target="_blank" rel="noreferrer">打开作品链接</a>` : ''}
+      ${action}
+    </article>
+  `;
+}
+
+function renderHistoryUserAction(record) {
+  const id = recordId(record);
+  if (!id) {
+    return '<p class="history-action-note">等待抖音发布入口。</p>';
+  }
+  const action = state.userActions.get(id);
+  if (action?.shortLink) {
+    return `
+      <div class="history-action">
+        <a class="handoff-button" href="${escapeHtml(action.shortLink)}" target="_blank" rel="noreferrer">打开发布入口</a>
+        <span class="handoff-link">${escapeHtml(action.shortLink)}</span>
+      </div>
+    `;
+  }
+  if (action?.error) {
+    return `<p class="history-error">抖音确认入口获取失败：${escapeHtml(action.error)}</p>`;
+  }
+  if (state.userActionLoading.has(id)) {
+    return '<p class="history-action-note">正在获取抖音确认入口...</p>';
+  }
+  loadUserAction(id);
+  return '<p class="history-action-note">等待获取抖音确认入口。</p>';
+}
+
+async function loadPublishHistory(options = {}) {
+  if (state.historyLoading && !options.force) {
+    return;
+  }
+  const showErrorToast = options.showErrorToast === true;
+  state.historyLoading = true;
+  state.publishHistoryError = '';
+  renderPublishHistory();
+  try {
+    const data = await api('/api/publish-records');
+    state.publishHistory = normalizePublishRecords(data).slice(0, 30);
+    state.publishHistoryError = '';
+    loadUserActionsForTasks(state.publishHistory);
+    startHistoryPolling();
+  }
+  catch (error) {
+    state.publishHistoryError = error.message || '请求失败';
+    if (showErrorToast) {
+      showToast(`历史发布记录加载失败：${state.publishHistoryError}`, 'danger');
+    }
+  }
+  finally {
+    state.historyLoading = false;
+    renderPublishHistory();
+  }
+}
+
+function startHistoryPolling() {
+  clearInterval(state.historyTimer);
+  const shouldPoll = state.publishHistory.some(record => !isFinalPublishStatus(record?.status));
+  if (!shouldPoll) {
+    return;
+  }
+  state.historyTimer = setInterval(() => {
+    loadPublishHistory().catch(() => {});
+  }, historyPollIntervalMs);
+}
+
 function loadUserActionsForTasks(tasks) {
   for (const task of tasks) {
-    if (task.platform !== 'douyin' || !isWaitingUserAction(task) || !task.id) {
+    if (recordPlatform(task) !== 'douyin' || !isWaitingUserAction(task) || !recordId(task)) {
       continue;
     }
-    if (state.userActions.has(task.id) || state.userActionLoading.has(task.id)) {
+    const id = recordId(task);
+    if (state.userActions.has(id) || state.userActionLoading.has(id)) {
       continue;
     }
-    loadUserAction(task.id);
+    loadUserAction(id);
   }
 }
 
@@ -2028,6 +2286,7 @@ async function loadUserAction(recordId) {
   }
   finally {
     state.userActionLoading.delete(recordId);
+    renderPublishHistory();
     if (state.activeFlowId) {
       try {
         const flow = await api(`/api/flows/${encodeURIComponent(state.activeFlowId)}`);
@@ -2315,6 +2574,7 @@ async function submitPublish(event) {
         body: JSON.stringify(payload),
       });
       state.activeFlowId = flow.flowId;
+      persistRecentFlowId(flow.flowId);
       startFlowPolling(flow.flowId);
     }
 
@@ -2337,6 +2597,7 @@ async function submitPublish(event) {
 
     renderResultBlocks(flow, state.activeHandoff, state.activeHandoffDelivery);
     setActiveView('publish');
+    loadPublishHistory({ force: true, showErrorToast: false });
     const message = flow && handoff
       ? '直接发布任务已提交，浏览器辅助内容包已生成。'
       : flow
@@ -2416,10 +2677,7 @@ function startFlowPolling(flowId) {
       const flow = await api(`/api/flows/${encodeURIComponent(flowId)}`);
       renderFlow(flow);
       const tasks = Array.isArray(flow.tasks) ? flow.tasks : [];
-      const allFinal = tasks.length > 0 && tasks.every(task => {
-        const value = String(task.status ?? '').toLowerCase();
-        return ['1', '-1', 'published', 'success', 'completed', 'failed', 'error', 'canceled', '9'].includes(value);
-      });
+      const allFinal = tasks.length > 0 && tasks.every(task => isFinalPublishStatus(task.status));
       if (allFinal || attempts >= 120) {
         clearInterval(state.flowTimer);
       }
@@ -2453,7 +2711,13 @@ function clearForm() {
 }
 
 function bindEvents() {
-  els.refreshButton.addEventListener('click', loadAll);
+  els.refreshButton.addEventListener('click', () => {
+    loadAll();
+    loadPublishHistory({ force: true, showErrorToast: true });
+  });
+  els.refreshHistoryButton?.addEventListener('click', () => {
+    loadPublishHistory({ force: true, showErrorToast: true });
+  });
   els.publishForm.addEventListener('submit', submitPublish);
   els.clearButton.addEventListener('click', clearForm);
   els.clearMediaButton.addEventListener('click', clearMediaItems);
@@ -2646,10 +2910,13 @@ function bindEvents() {
 }
 
 setDefaultPublishTime();
+restoreRecentFlowId();
 updateMediaModeUi();
 renderMediaQueue();
 renderPlatformOptions();
+renderPublishHistory();
 bindEvents();
 setActiveView('overview');
 buildPreflight();
 loadAll();
+loadPublishHistory();

@@ -1136,6 +1136,34 @@ async function handleApi(req, res, url) {
       return;
     }
 
+    if (url.pathname === '/api/publish-records' && req.method === 'GET') {
+      const requestId = `publish-records-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+      const searchParams = new URLSearchParams();
+      for (const key of ['accountId', 'accountType', 'status', 'time']) {
+        const value = url.searchParams.get(key);
+        if (value) {
+          searchParams.set(key, value);
+        }
+      }
+
+      try {
+        const result = await upstream(req, '/v2/channels/publish/records', {
+          searchParams,
+        });
+        ok(res, result.data);
+      }
+      catch (error) {
+        error.requestId = requestId;
+        logEvent('error', 'publish_records_query_failed', {
+          requestId,
+          query: Object.fromEntries(searchParams.entries()),
+          error: summarizeError(error),
+        });
+        throw error;
+      }
+      return;
+    }
+
     const flowMatch = url.pathname.match(/^\/api\/flows\/([^/]+)$/);
     if (flowMatch && req.method === 'GET') {
       const flowId = decodeURIComponent(flowMatch[1]);
