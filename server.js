@@ -162,8 +162,117 @@ function ok(res, data, extraHeaders) {
   json(res, 200, { ok: true, data }, extraHeaders);
 }
 
-function fail(res, statusCode, message, details) {
-  json(res, statusCode, { ok: false, message, details });
+function fail(res, statusCode, message, details, extra = {}) {
+  json(res, statusCode, { ok: false, message, details, ...extra });
+}
+
+function logEvent(level, event, data = {}) {
+  const logger = level === 'error' ? console.error : level === 'warn' ? console.warn : console.log;
+  logger(JSON.stringify({
+    time: new Date().toISOString(),
+    level,
+    event,
+    ...data,
+  }));
+}
+
+function truncateLogValue(value, maxLength = 180) {
+  const text = String(value ?? '');
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+}
+
+function summarizePublishPayload(payload) {
+  const content = asPlainObject(payload?.content);
+  const media = Array.isArray(content.media) ? content.media : [];
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  return {
+    flowId: payload?.flowId || '',
+    publishAt: payload?.publishAt || '',
+    context: payload?.context || {},
+    content: {
+      titleLength: typeof content.title === 'string' ? content.title.length : 0,
+      titlePreview: truncateLogValue(content.title, 80),
+      bodyLength: typeof content.body === 'string' ? content.body.length : 0,
+      mediaCount: media.length,
+      mediaUrls: media.map(item => truncateLogValue(item?.url, 160)),
+      hasCover: Boolean(content.cover?.url),
+      coverUrl: content.cover?.url ? truncateLogValue(content.cover.url, 160) : '',
+    },
+    items: items.map(item => ({
+      accountId: item?.accountId || '',
+      platform: item?.platform || '',
+      optionKeys: item?.option && typeof item.option === 'object' ? Object.keys(item.option) : [],
+      option: summarizePlatformOption(item?.platform, item?.option),
+      hasOverrides: Boolean(item?.overrides),
+    })),
+  };
+}
+
+function summarizePlatformOption(platform, option) {
+  const raw = asPlainObject(option);
+  if (!Object.keys(raw).length) {
+    return {};
+  }
+  if (platform === 'wxSph') {
+    return {
+      hasWorkId: Boolean(raw.workId),
+      workIdPreview: raw.workId ? truncateLogValue(raw.workId, 80) : '',
+      hasWorkLink: Boolean(raw.workLink),
+      workLinkPreview: raw.workLink ? truncateLogValue(raw.workLink, 120) : '',
+      linkStatus: raw.linkStatus || '',
+      hasLinkMeta: Boolean(raw.linkMeta),
+    };
+  }
+  if (platform === 'xhs') {
+    return {
+      hasWorkLink: Boolean(raw.workLink),
+      workLinkPreview: raw.workLink ? truncateLogValue(raw.workLink, 120) : '',
+    };
+  }
+  return raw;
+}
+
+function summarizePublishRequestBody(body) {
+  const accountIds = Array.isArray(body?.accountIds) ? body.accountIds : [];
+  const accounts = Array.isArray(body?.accounts) ? body.accounts : [];
+  const mediaUrls = normalizeMediaUrls(body?.mediaUrls);
+  const selectedAccounts = accounts
+    .filter(account => account && accountIds.includes(account.id))
+    .map(account => ({
+      id: account.id,
+      type: account.type,
+      name: truncateLogValue(account.name || account.nickname || account.account || '', 80),
+    }));
+
+  return {
+    kind: body?.kind || '',
+    mediaMode: body?.mediaMode || '',
+    publishMode: body?.publishMode || '',
+    publishAt: body?.publishAt || '',
+    titleLength: typeof body?.title === 'string' ? body.title.length : 0,
+    titlePreview: truncateLogValue(body?.title, 80),
+    bodyLength: typeof body?.body === 'string' ? body.body.length : 0,
+    mediaCount: mediaUrls.length,
+    mediaUrls: mediaUrls.map(url => truncateLogValue(url, 160)),
+    hasCover: Boolean(body?.coverUrl),
+    coverUrl: body?.coverUrl ? truncateLogValue(body.coverUrl, 160) : '',
+    accountIds,
+    selectedAccounts,
+    platformOptionKeys: Object.fromEntries(Object.entries(asPlainObject(body?.platformOptions)).map(([platform, option]) => [
+      platform,
+      option && typeof option === 'object' ? Object.keys(option) : [],
+    ])),
+  };
+}
+
+function summarizeError(error) {
+  return {
+    message: error?.message || '',
+    statusCode: Number(error?.statusCode || 0) || undefined,
+    details: error?.details,
+    upstream: error?.upstream,
+    stack: error?.stack ? truncateLogValue(error.stack, 600) : undefined,
+  };
 }
 
 async function readJsonBody(req) {
@@ -942,12 +1051,48 @@ async function handleApi(req, res, url) {
 
     if (url.pathname === '/api/publish' && req.method === 'POST') {
       const body = await readJsonBody(req);
-      const payload = validatePublishPayload(body);
-      const result = await upstream(req, '/v2/channels/publish/flows', {
-        method: 'POST',
-        body: payload,
+      const requestId = `publish-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+      let payload;
+      try {
+        payload = validatePublishPayload(body);
+      }
+      catch (error) {
+        error.requestId = requestId;
+        logEvent('warn', 'publish_payload_validation_failed', {
+          requestId,
+          request: summarizePublishRequestBody(body),
+          error: summarizeError(error),
+        });
+        throw error;
+      }
+
+      logEvent('info', 'publish_payload_ready', {
+        requestId,
+        request: summarizePublishRequestBody(body),
+        payload: summarizePublishPayload(payload),
       });
-      ok(res, result.data);
+
+      try {
+        const result = await upstream(req, '/v2/channels/publish/flows', {
+          method: 'POST',
+          body: payload,
+        });
+        logEvent('info', 'publish_upstream_success', {
+          requestId,
+          flowId: result.data?.flowId || payload.flowId,
+          taskCount: Array.isArray(result.data?.tasks) ? result.data.tasks.length : 0,
+        });
+        ok(res, result.data);
+      }
+      catch (error) {
+        error.requestId = requestId;
+        logEvent('error', 'publish_upstream_failed', {
+          requestId,
+          payload: summarizePublishPayload(payload),
+          error: summarizeError(error),
+        });
+        throw error;
+      }
       return;
     }
 
@@ -978,7 +1123,22 @@ async function handleApi(req, res, url) {
   }
   catch (error) {
     const statusCode = Number(error.statusCode || 500);
-    fail(res, statusCode, error.message || '服务端错误', error.details || error.upstream);
+    const requestId = error.requestId || '';
+    if (statusCode >= 500) {
+      logEvent('error', 'api_request_failed', {
+        method: req.method,
+        path: url.pathname,
+        requestId,
+        error: summarizeError(error),
+      });
+    }
+    fail(
+      res,
+      statusCode,
+      error.message || '服务端错误',
+      error.details || error.upstream,
+      requestId ? { requestId } : {},
+    );
   }
 }
 

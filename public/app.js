@@ -249,6 +249,7 @@ async function api(path, options = {}) {
   if (!response.ok || !payload.ok) {
     const error = new Error(payload.message || `请求失败：${response.status}`);
     error.details = payload.details;
+    error.requestId = payload.requestId || '';
     error.statusCode = response.status;
     error.transient = [502, 503, 504].includes(response.status);
     throw error;
@@ -2320,12 +2321,60 @@ async function submitPublish(event) {
     showToast(message);
   }
   catch (error) {
-    const details = Array.isArray(error.details) ? `：${error.details[0]}` : '';
-    showToast(`${error.message}${details}`, 'danger');
+    const details = formatErrorDetails(error.details);
+    const requestId = error.requestId ? `（日志 ID：${error.requestId}）` : '';
+    showToast(`${error.message}${details}${requestId}`, 'danger');
   }
   finally {
     els.publishButton.disabled = false;
   }
+}
+
+function formatErrorDetails(details) {
+  if (!details) {
+    return '';
+  }
+  if (Array.isArray(details)) {
+    const first = details.find(Boolean);
+    return first ? `：${formatErrorDetailItem(first)}` : '';
+  }
+  if (typeof details === 'string') {
+    return `：${details}`;
+  }
+  if (typeof details === 'object') {
+    if (Array.isArray(details.issues) && details.issues.length > 0) {
+      return `：${formatErrorDetailItem(details.issues[0])}`;
+    }
+    if (Array.isArray(details.errors) && details.errors.length > 0) {
+      return `：${formatErrorDetailItem(details.errors[0])}`;
+    }
+    if (details.message || details.msg || details.error) {
+      return `：${details.message || details.msg || details.error}`;
+    }
+    if (details.code && details.path) {
+      return `：${formatErrorDetailItem(details)}`;
+    }
+  }
+  return '';
+}
+
+function formatErrorDetailItem(item) {
+  if (typeof item === 'string') {
+    return item;
+  }
+  if (!item || typeof item !== 'object') {
+    return String(item || '');
+  }
+  const message = item.message || item.msg || item.error || item.code || '字段校验失败';
+  const path = Array.isArray(item.path) ? item.path.join('.') : item.path;
+  const params = item.params && typeof item.params === 'object'
+    ? Object.entries(item.params).map(([key, value]) => `${key}=${String(value)}`).join(', ')
+    : '';
+  return [
+    message,
+    path ? `字段 ${path}` : '',
+    params ? `参数 ${params}` : '',
+  ].filter(Boolean).join('，');
 }
 
 function startFlowPolling(flowId) {
