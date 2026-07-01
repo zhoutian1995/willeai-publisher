@@ -6,7 +6,7 @@
     <title>WilleAI Publish Studio</title>
     <meta name="description" content="WilleAI 跨平台内容发布工作台" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=20260630-publish1" />
+    <link rel="stylesheet" href="/styles.css?v=20260701-targets1" />
   </head>
   <body>
     <a class="skip-link" href="#overviewTitle">跳到工作区</a>
@@ -121,6 +121,7 @@
               </div>
 
               <div class="publish-form">
+                <div id="publishTargetPanel"></div>
                 <label class="field title-field">
                   <span>标题</span>
                   <input id="titleInput" type="text" maxlength="120" placeholder="填写要同步到各平台的标题" />
@@ -188,6 +189,7 @@
                 <p class="section-kicker">提交前</p>
                 <h2>交付检查</h2>
                 <p>必填项通过后可直接提交；也可以先打开检查页查看阻塞项。</p>
+                <p class="selected-targets-summary" id="selectedTargetsSummary">将发布到：请选择发布目标</p>
                 <div class="action-row vertical-actions">
                   <button class="primary-button" id="publishButton" type="submit">
                     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -245,6 +247,6 @@
     </div>
 
     <div class="toast-region" id="toastRegion" aria-live="polite"></div>
-    <script src="/app.js?v=20260630-publish1" type="module"></script>
+    <script src="/app.js?v=20260701-targets1" type="module"></script>
   </body>
 </html>

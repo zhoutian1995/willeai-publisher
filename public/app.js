@@ -16,11 +16,15 @@ const platformNames = new Map([
   ['twitter', 'X'],
 ]);
 
+const selectedAccountsStorageKey = 'willeai.publisher.selectedAccounts.v1';
+
 const state = {
   health: null,
   platforms: [],
   accounts: [],
   selectedAccountIds: new Set(),
+  selectionHistoryExists: false,
+  selectionNotice: '',
   authSessions: new Map(),
   platformOptions: {
     bilibili: {
@@ -82,7 +86,9 @@ const els = {
   coverInput: document.querySelector('#coverInput'),
   publishAtInput: document.querySelector('#publishAtInput'),
   preflightList: document.querySelector('#preflightList'),
+  publishTargetPanel: document.querySelector('#publishTargetPanel'),
   platformOptionsList: document.querySelector('#platformOptionsList'),
+  selectedTargetsSummary: document.querySelector('#selectedTargetsSummary'),
   flowBox: document.querySelector('#flowBox'),
   flowMeta: document.querySelector('#flowMeta'),
   toastRegion: document.querySelector('#toastRegion'),
@@ -217,12 +223,123 @@ function localizedText(value) {
   return value['zh-CN'] || value['en-US'] || '';
 }
 
+function accountId(account) {
+  return String(account?.id || '');
+}
+
 function getSelectedAccounts() {
-  return state.accounts.filter(account => state.selectedAccountIds.has(account.id));
+  return state.accounts.filter(account => getAccountStatus(account) === 'normal' && state.selectedAccountIds.has(accountId(account)));
 }
 
 function getSelectedPlatformIds() {
   return [...new Set(getSelectedAccounts().map(account => account.type))];
+}
+
+function getAvailableAccounts() {
+  const order = new Map(preferredPlatforms.map((platform, index) => [platform, index]));
+  return state.accounts
+    .filter(account => getAccountStatus(account) === 'normal' && accountId(account))
+    .sort((a, b) => {
+      const ao = order.has(a.type) ? order.get(a.type) : 100;
+      const bo = order.has(b.type) ? order.get(b.type) : 100;
+      if (ao !== bo) {
+        return ao - bo;
+      }
+      const rankDiff = Number(a.rank || 0) - Number(b.rank || 0);
+      if (rankDiff !== 0) {
+        return rankDiff;
+      }
+      return accountName(a).localeCompare(accountName(b), 'zh-CN');
+    });
+}
+
+function getSelectedPlatformNames() {
+  return getSelectedPlatformIds().map((platformId) => {
+    const platform = getPlatformDefinition(platformId);
+    return platform.platform ? getPlatformName(platform) : platformNames.get(platformId) || platformId;
+  });
+}
+
+function readStoredSelectedAccountIds() {
+  try {
+    const raw = window.localStorage.getItem(selectedAccountsStorageKey);
+    state.selectionHistoryExists = raw !== null;
+    if (raw === null || raw.trim() === '') {
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      state.selectionHistoryExists = false;
+      return [];
+    }
+    return [...new Set(parsed.map(value => String(value || '').trim()).filter(Boolean))];
+  }
+  catch {
+    state.selectionHistoryExists = false;
+    return [];
+  }
+}
+
+function persistSelectedAccountIds() {
+  try {
+    window.localStorage.setItem(selectedAccountsStorageKey, JSON.stringify([...state.selectedAccountIds]));
+    state.selectionHistoryExists = true;
+  }
+  catch {
+    state.selectionNotice = '浏览器无法保存发布目标选择，刷新后可能需要重新选择。';
+  }
+}
+
+function restoreSelectedAccountsFromStorage() {
+  const storedIds = readStoredSelectedAccountIds();
+  const validIds = new Set(getAvailableAccounts().map(accountId));
+
+  if (!state.selectionHistoryExists) {
+    pruneSelectedAccounts(false);
+    state.selectionNotice = '';
+    return;
+  }
+
+  const restoredIds = storedIds.filter(id => validIds.has(id));
+  state.selectedAccountIds = new Set(restoredIds);
+
+  if (restoredIds.length !== storedIds.length) {
+    persistSelectedAccountIds();
+    state.selectionNotice = restoredIds.length > 0
+      ? '上次选择中有账号已失效或被移除，已自动忽略。'
+      : '上次选择的账号已失效或被移除，请重新选择发布目标。';
+    showToast(state.selectionNotice, 'warn');
+    return;
+  }
+
+  state.selectionNotice = '';
+}
+
+function setSelectedAccount(targetAccountId, isSelected) {
+  const normalizedAccountId = String(targetAccountId || '');
+  const account = state.accounts.find(item => accountId(item) === normalizedAccountId);
+  if (!account || getAccountStatus(account) !== 'normal') {
+    showToast('该账号当前不可用，请重新连接后再选择。', 'warn');
+    return;
+  }
+  if (isSelected) {
+    state.selectedAccountIds.add(normalizedAccountId);
+  }
+  else {
+    state.selectedAccountIds.delete(normalizedAccountId);
+  }
+  state.selectionNotice = '';
+  persistSelectedAccountIds();
+  renderSelectionSurfaces();
+}
+
+function renderSelectionSurfaces() {
+  renderPlatformGrid();
+  renderPublishTargetPanel();
+  renderSelectedTargetsSummary();
+  renderPlatformOptions();
+  maybeLoadSelectedPlatformOptions();
+  buildPreflight();
 }
 
 function isDataImageUrl(value) {
@@ -351,7 +468,7 @@ function renderPlatformGrid() {
     const accounts = getAccountsByPlatform(platform.platform);
     const connected = accounts.filter(account => getAccountStatus(account) === 'normal');
     const abnormal = accounts.length - connected.length;
-    const isSelected = connected.some(account => state.selectedAccountIds.has(account.id));
+    const isSelected = connected.some(account => state.selectedAccountIds.has(accountId(account)));
     const statusTone = connected.length > 0 ? 'ok' : abnormal > 0 ? 'warn' : 'danger';
     const statusText = connected.length > 0
       ? `${connected.length} 个已连接`
@@ -393,18 +510,110 @@ function renderAccountList(platform, connected, abnormalCount) {
 
   return `
     <div class="account-list">
-      ${connected.map(account => `
-        <label class="account-option">
-          <input type="checkbox" data-action="select-account" value="${escapeHtml(account.id)}" ${state.selectedAccountIds.has(account.id) ? 'checked' : ''} />
-          <span class="avatar">${renderAvatar(account)}</span>
-          <span>
-            <span class="account-name">${escapeHtml(accountName(account))}</span>
-            <span class="account-id">${escapeHtml(platformNames.get(platformId) || platformId)} · ${escapeHtml(account.uid || account.id)}</span>
-          </span>
-        </label>
-      `).join('')}
+      ${connected.map(account => renderAccountChoice(account, { platformId, compact: true })).join('')}
     </div>
   `;
+}
+
+function renderAccountChoice(account, options = {}) {
+  const platformId = options.platformId || account.type;
+  const platformLabel = platformNames.get(platformId) || platformId;
+  const id = accountId(account);
+  const checked = state.selectedAccountIds.has(id);
+  return `
+    <label class="account-option${checked ? ' is-selected' : ''}">
+      <input type="checkbox" data-action="select-account" value="${escapeHtml(id)}" ${checked ? 'checked' : ''} />
+      <span class="avatar">${renderAvatar(account)}</span>
+      <span class="account-copy">
+        <span class="account-name">${escapeHtml(accountName(account))}</span>
+        <span class="account-id">${escapeHtml(platformLabel)} / ${escapeHtml(account.uid || id)}</span>
+      </span>
+      ${options.compact ? '' : '<span class="mini-pill is-ok">可发布</span>'}
+    </label>
+  `;
+}
+
+function renderPublishTargetPanel() {
+  if (!els.publishTargetPanel) {
+    return;
+  }
+
+  const availableAccounts = getAvailableAccounts();
+  const selectedAccounts = getSelectedAccounts();
+  const selectedPlatforms = getSelectedPlatformNames();
+  const onlyAccount = availableAccounts.length === 1 ? availableAccounts[0] : null;
+  const summaryText = selectedAccounts.length > 0
+    ? `已选择 ${selectedAccounts.length} 个账号：${selectedPlatforms.join(' / ')}`
+    : availableAccounts.length > 0
+      ? '请选择本次要发布到的账号。系统会记住这次选择。'
+      : '还没有可用账号，请先连接或重新授权。';
+
+  if (availableAccounts.length === 0) {
+    els.publishTargetPanel.innerHTML = `
+      <section class="publish-target-panel" tabindex="-1" aria-labelledby="publishTargetTitle">
+        <div class="publish-target-head">
+          <div>
+            <span id="publishTargetTitle" class="field-title">发布目标</span>
+            <p>${escapeHtml(summaryText)}</p>
+          </div>
+          <button class="small-button" type="button" data-view-target="accounts">去连接账号</button>
+        </div>
+      </section>
+    `;
+    return;
+  }
+
+  els.publishTargetPanel.innerHTML = `
+    <section class="publish-target-panel" tabindex="-1" aria-labelledby="publishTargetTitle">
+      <div class="publish-target-head">
+        <div>
+          <span id="publishTargetTitle" class="field-title">发布目标</span>
+          <p>${escapeHtml(summaryText)}</p>
+          ${state.selectionNotice ? `<p class="target-warning">${escapeHtml(state.selectionNotice)}</p>` : ''}
+        </div>
+        <span class="mini-pill ${selectedAccounts.length > 0 ? 'is-ok' : 'is-warn'}">${escapeHtml(selectedAccounts.length > 0 ? `已选 ${selectedAccounts.length}` : '未选择')}</span>
+      </div>
+      <div class="publish-target-list">
+        ${availableAccounts.map(account => renderPublishTargetOption(account)).join('')}
+      </div>
+      ${onlyAccount && selectedAccounts.length === 0 && !state.selectionHistoryExists ? `
+        <button class="small-button target-quick-button" type="button" data-action="select-only-account" data-account-id="${escapeHtml(accountId(onlyAccount))}">
+          选择此账号
+        </button>
+      ` : ''}
+    </section>
+  `;
+}
+
+function renderPublishTargetOption(account) {
+  const platformId = account.type;
+  const platformLabel = platformNames.get(platformId) || platformId;
+  const id = accountId(account);
+  const checked = state.selectedAccountIds.has(id);
+  return `
+    <label class="publish-target-option${checked ? ' is-selected' : ''}">
+      <input type="checkbox" data-action="select-account" value="${escapeHtml(id)}" ${checked ? 'checked' : ''} />
+      <span class="avatar">${renderAvatar(account)}</span>
+      <span class="target-account-copy">
+        <span class="target-account-top">
+          <strong>${escapeHtml(accountName(account))}</strong>
+          <span class="mini-pill is-ok">正常</span>
+        </span>
+        <span>${escapeHtml(platformLabel)} / ${escapeHtml(account.uid || id)}</span>
+      </span>
+    </label>
+  `;
+}
+
+function renderSelectedTargetsSummary() {
+  if (!els.selectedTargetsSummary) {
+    return;
+  }
+  const names = getSelectedPlatformNames();
+  els.selectedTargetsSummary.textContent = names.length > 0
+    ? `将发布到：${names.join(' / ')}`
+    : '将发布到：请选择发布目标';
+  els.selectedTargetsSummary.classList.toggle('is-ready', names.length > 0);
 }
 
 function renderAuthSession(platformId) {
@@ -425,7 +634,7 @@ function renderAuthSession(platformId) {
           <label class="account-option">
             <input type="checkbox" data-action="select-auth-account" data-platform="${escapeHtml(platformId)}" data-platform-uid="${escapeHtml(account.platformUid)}" data-account="${escapeHtml(account.account || '')}" checked />
             <span class="avatar">${account.avatarUrl ? `<img src="${escapeHtml(account.avatarUrl)}" alt="" />` : initials(account.displayName)}</span>
-            <span>
+            <span class="account-copy">
               <span class="account-name">${escapeHtml(account.displayName || account.platformUid)}</span>
               <span class="account-id">${escapeHtml(account.platformUid)}${account.account ? ` · ${escapeHtml(account.account)}` : ''}</span>
             </span>
@@ -655,7 +864,7 @@ async function loadBilibiliOptions(force = false) {
     return;
   }
   try {
-    const result = await api(`/api/accounts/${encodeURIComponent(account.id)}/publish-options/tid/values`);
+    const result = await api(`/api/accounts/${encodeURIComponent(accountId(account))}/publish-options/tid/values`);
     state.optionValues.bilibiliTid = result;
     const items = flattenOptionItems(result?.items);
     if (items.length > 0 && !items.some(item => item.value === state.platformOptions.bilibili.tid)) {
@@ -939,7 +1148,8 @@ function buildPreflight() {
   const checks = [
     {
       ok: selectedAccounts.length > 0,
-      text: selectedAccounts.length > 0 ? `已选择 ${selectedAccounts.length} 个目标` : '还没有选择发布账号',
+      text: selectedAccounts.length > 0 ? `已选择 ${selectedAccounts.length} 个目标` : '请选择发布目标',
+      action: selectedAccounts.length > 0 ? '' : 'target',
     },
     {
       ok: title.length > 0 || body.length > 0,
@@ -1032,16 +1242,18 @@ function buildPreflight() {
     <div class="check-row ${check.ok ? 'is-ok' : check.warn ? 'is-warn' : ''}">
       <span class="check-icon">${check.ok ? '✓' : check.warn ? '!' : '×'}</span>
       <span>${escapeHtml(check.text)}</span>
+      ${check.action === 'target' ? '<button class="check-action" type="button" data-action="go-publish-target">选择目标</button>' : ''}
     </div>
   `).join('');
 
+  renderSelectedTargetsSummary();
   updateOverview({ issues, selectedAccounts, mediaUrls });
   return { issues, selectedAccounts, mediaUrls };
 }
 
 function updateOverview(preflight) {
   const selectedAccounts = preflight?.selectedAccounts
-    || state.accounts.filter(account => state.selectedAccountIds.has(account.id));
+    || state.accounts.filter(account => state.selectedAccountIds.has(accountId(account)));
   const mediaUrls = preflight?.mediaUrls || getMediaUrls();
   const normalCount = state.accounts.filter(account => getAccountStatus(account) === 'normal').length;
   const hasContent = els.titleInput.value.trim().length > 0 || els.bodyInput.value.trim().length > 0;
@@ -1073,9 +1285,10 @@ function updateOverviewSignals(summary) {
   const activeFlow = Boolean(state.activeFlowId);
   const next = !summary.hasAccounts
     ? {
-      title: '先选择目标',
-      text: summary.normalCount > 0 ? '勾选本次要同步的平台账号。' : '先连接至少一个可用平台账号。',
-      view: 'accounts',
+      title: summary.normalCount > 0 ? '选择发布目标' : '先连接目标',
+      text: summary.normalCount > 0 ? '在内容页勾选本次要同步的平台账号。' : '先连接至少一个可用平台账号。',
+      view: summary.normalCount > 0 ? 'compose' : 'accounts',
+      focusTarget: summary.normalCount > 0 ? 'publish-target' : '',
     }
     : !summary.hasContent
       ? {
@@ -1115,6 +1328,12 @@ function updateOverviewSignals(summary) {
   }
   if (els.nextActionButton) {
     els.nextActionButton.dataset.viewTarget = next.view;
+    if (next.focusTarget) {
+      els.nextActionButton.dataset.focusTarget = next.focusTarget;
+    }
+    else {
+      delete els.nextActionButton.dataset.focusTarget;
+    }
   }
   if (els.accountSignal) {
     els.accountSignal.textContent = summary.hasAccounts ? `已选 ${summary.selectedCount} 个目标` : '等待选择目标';
@@ -1149,6 +1368,20 @@ function setActiveView(viewName) {
       trigger.setAttribute('aria-current', isActive ? 'page' : 'false');
     }
   });
+}
+
+function focusPublishTargetPanel() {
+  const panel = els.publishTargetPanel?.querySelector('.publish-target-panel');
+  if (!panel) {
+    return;
+  }
+  panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  panel.focus({ preventScroll: true });
+}
+
+function goToPublishTarget() {
+  setActiveView('compose');
+  window.setTimeout(focusPublishTargetPanel, 60);
 }
 
 function renderFlow(flow) {
@@ -1298,8 +1531,11 @@ async function loadAll() {
       state.platforms = [];
       state.accounts = [];
       state.selectedAccountIds.clear();
+      state.selectionNotice = '';
       setStatus('缺少 API Key', 'danger');
       renderPlatformGrid();
+      renderPublishTargetPanel();
+      renderSelectedTargetsSummary();
       buildPreflight();
       return;
     }
@@ -1310,9 +1546,11 @@ async function loadAll() {
     ]);
     state.platforms = Array.isArray(platforms) ? platforms : [];
     state.accounts = Array.isArray(accounts.list) ? accounts.list : [];
-    pruneSelectedAccounts();
+    restoreSelectedAccountsFromStorage();
     setStatus('API 已连接', 'ok');
     renderPlatformGrid();
+    renderPublishTargetPanel();
+    renderSelectedTargetsSummary();
     renderPlatformOptions();
     maybeLoadSelectedPlatformOptions();
     buildPreflight();
@@ -1321,6 +1559,9 @@ async function loadAll() {
     setStatus('API 连接异常', 'danger');
     showToast(error.message, 'danger');
     renderPlatformGrid();
+    renderPublishTargetPanel();
+    renderSelectedTargetsSummary();
+    buildPreflight();
   }
   finally {
     setLoading(false);
@@ -1328,11 +1569,19 @@ async function loadAll() {
 }
 
 function pruneSelectedAccounts() {
-  const validIds = new Set(state.accounts.filter(account => getAccountStatus(account) === 'normal').map(account => account.id));
+  const validIds = new Set(state.accounts.filter(account => getAccountStatus(account) === 'normal').map(accountId));
+  let changed = false;
   for (const id of [...state.selectedAccountIds]) {
     if (!validIds.has(id)) {
       state.selectedAccountIds.delete(id);
+      changed = true;
     }
+  }
+  if (changed && state.selectionHistoryExists) {
+    persistSelectedAccountIds();
+    state.selectionNotice = state.selectedAccountIds.size > 0
+      ? '部分已选账号已失效或被移除，已自动忽略。'
+      : '已选账号已失效或被移除，请重新选择发布目标。';
   }
 }
 
@@ -1503,6 +1752,8 @@ async function refreshAccountsSoon() {
       state.accounts = Array.isArray(accounts.list) ? accounts.list : [];
       pruneSelectedAccounts();
       renderPlatformGrid();
+      renderPublishTargetPanel();
+      renderSelectedTargetsSummary();
       renderPlatformOptions();
       maybeLoadSelectedPlatformOptions();
       buildPreflight();
@@ -1530,7 +1781,7 @@ async function submitPublish(event) {
       mediaMode: state.mediaMode,
       coverUrl: els.coverInput.value,
       publishAt: els.publishAtInput.value ? new Date(els.publishAtInput.value).toISOString() : new Date().toISOString(),
-      accountIds: [...state.selectedAccountIds],
+      accountIds: preflight.selectedAccounts.map(accountId),
       accounts: state.accounts,
       platformOptions: state.platformOptions,
     };
@@ -1584,13 +1835,10 @@ function clearForm() {
   els.bodyInput.value = '';
   clearMediaItems();
   els.coverInput.value = '';
-  state.selectedAccountIds.clear();
   state.userActions.clear();
   state.userActionLoading.clear();
   setDefaultPublishTime();
-  renderPlatformGrid();
-  renderPlatformOptions();
-  buildPreflight();
+  renderSelectionSurfaces();
   renderFlow(null);
 }
 
@@ -1650,8 +1898,34 @@ function bindEvents() {
 
   els.viewTriggers.forEach((trigger) => {
     trigger.addEventListener('click', () => {
+      if (trigger.dataset.focusTarget === 'publish-target') {
+        goToPublishTarget();
+        return;
+      }
       setActiveView(trigger.dataset.viewTarget);
     });
+  });
+
+  document.addEventListener('click', (event) => {
+    const actionTarget = event.target.closest('[data-action]');
+    if (actionTarget?.dataset.action === 'go-publish-target') {
+      goToPublishTarget();
+      return;
+    }
+    if (actionTarget?.dataset.action === 'select-only-account') {
+      setSelectedAccount(actionTarget.dataset.accountId, true);
+      return;
+    }
+
+    const viewTarget = event.target.closest('[data-view-target]');
+    if (!viewTarget || [...els.viewTriggers].includes(viewTarget)) {
+      return;
+    }
+    if (viewTarget.dataset.focusTarget === 'publish-target') {
+      goToPublishTarget();
+      return;
+    }
+    setActiveView(viewTarget.dataset.viewTarget);
   });
 
   for (const input of [els.titleInput, els.bodyInput, els.mediaInput, els.coverInput, els.publishAtInput]) {
@@ -1685,16 +1959,20 @@ function bindEvents() {
     const target = event.target;
     if (target.dataset.action === 'select-account') {
       if (target.checked) {
-        state.selectedAccountIds.add(target.value);
+        setSelectedAccount(target.value, true);
       }
       else {
-        state.selectedAccountIds.delete(target.value);
+        setSelectedAccount(target.value, false);
       }
-      renderPlatformGrid();
-      renderPlatformOptions();
-      maybeLoadSelectedPlatformOptions();
-      buildPreflight();
     }
+  });
+
+  els.publishTargetPanel?.addEventListener('change', (event) => {
+    const target = event.target;
+    if (target.dataset.action !== 'select-account') {
+      return;
+    }
+    setSelectedAccount(target.value, target.checked);
   });
 
   els.platformOptionsList.addEventListener('change', (event) => {
