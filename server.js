@@ -363,6 +363,167 @@ function cleanOptionText(value, maxLength = 500) {
   return typeof value === 'string' ? value.trim().slice(0, maxLength) : '';
 }
 
+function cleanStringArray(value, maxItems = 30, maxLength = 100) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return [...new Set(value
+    .map(item => String(item || '').trim())
+    .filter(Boolean)
+    .map(item => item.slice(0, maxLength)))]
+    .slice(0, maxItems);
+}
+
+function normalizeContentKind(value, fallback = 'video') {
+  return ['video', 'article', 'dynamic'].includes(value) ? value : fallback;
+}
+
+function normalizePublishMode(value) {
+  return value === 'auto' ? 'auto' : 'draft';
+}
+
+function normalizeMediaUrls(value) {
+  return Array.isArray(value)
+    ? value.map(item => String(item || '').trim()).filter(Boolean)
+    : [];
+}
+
+function simpleHtmlFromText(value) {
+  const text = String(value || '').trim();
+  if (!text) {
+    return '';
+  }
+  return text
+    .split(/\n{2,}/)
+    .map(paragraph => `<p>${escapeHtmlForContent(paragraph).replace(/\n/g, '<br>')}</p>`)
+    .join('\n');
+}
+
+function escapeHtmlForContent(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function filenameFromUrl(value, fallback) {
+  try {
+    const pathname = new URL(value).pathname;
+    const name = decodeURIComponent(pathname.split('/').filter(Boolean).pop() || '');
+    return name || fallback;
+  }
+  catch {
+    return fallback;
+  }
+}
+
+function guessFileType(url) {
+  if (/\.(jpe?g)(\?|#|$)/i.test(url)) {
+    return 'image/jpeg';
+  }
+  if (/\.png(\?|#|$)/i.test(url)) {
+    return 'image/png';
+  }
+  if (/\.webp(\?|#|$)/i.test(url)) {
+    return 'image/webp';
+  }
+  if (/\.gif(\?|#|$)/i.test(url)) {
+    return 'image/gif';
+  }
+  if (/\.(mp4|m4v)(\?|#|$)/i.test(url)) {
+    return 'video/mp4';
+  }
+  if (/\.mov(\?|#|$)/i.test(url)) {
+    return 'video/quicktime';
+  }
+  if (/\.webm(\?|#|$)/i.test(url)) {
+    return 'video/webm';
+  }
+  return undefined;
+}
+
+function fileDataFromUrl(url, fallbackName) {
+  return {
+    name: filenameFromUrl(url, fallbackName),
+    url,
+    ...(guessFileType(url) ? { type: guessFileType(url) } : {}),
+  };
+}
+
+function normalizeContentPackage(body, errors, options = {}) {
+  const fallbackKind = body.mediaMode === 'images' ? 'legacy_images' : 'video';
+  const kind = normalizeContentKind(body.kind, fallbackKind);
+  const title = cleanOptionText(body.title, 300);
+  const bodyText = cleanOptionText(body.body, 200000);
+  const digest = cleanOptionText(body.digest, 500);
+  const rawHtmlContent = cleanOptionText(body.htmlContent, 500000);
+  const markdownContent = cleanOptionText(body.markdownContent, 500000) || bodyText;
+  const htmlContent = rawHtmlContent || simpleHtmlFromText(markdownContent || bodyText);
+  const coverUrl = cleanOptionText(body.coverUrl, 1000);
+  const mediaUrls = normalizeMediaUrls(body.mediaUrls);
+  const tags = cleanStringArray(body.tags, 30, 50);
+  const publishMode = normalizePublishMode(body.publishMode);
+
+  if (kind === 'video') {
+    if (!title && !bodyText) {
+      errors.push('标题和正文至少填写一项');
+    }
+    if (mediaUrls.length === 0) {
+      errors.push('视频发布请至少上传一个视频或填写一个备用视频链接');
+    }
+    if (mediaUrls.length > 1) {
+      errors.push('视频模式一次只提交一个素材');
+    }
+  }
+
+  if (kind === 'article') {
+    if (!title) {
+      errors.push('长文章需要填写标题');
+    }
+    if (!bodyText && !markdownContent && !rawHtmlContent) {
+      errors.push('长文章需要填写正文');
+    }
+  }
+
+  if (kind === 'dynamic' && !bodyText) {
+    errors.push('短动态需要填写正文');
+  }
+
+  if (kind === 'legacy_images' && !title && !bodyText) {
+    errors.push('标题和正文至少填写一项');
+  }
+  if (kind === 'legacy_images' && mediaUrls.length === 0) {
+    errors.push('请至少上传一个素材或填写一个备用素材链接');
+  }
+
+  for (const url of mediaUrls) {
+    if (!isHttpsUrl(url)) {
+      errors.push(`素材链接必须以 https:// 开头：${url}`);
+    }
+  }
+  if (coverUrl && !isHttpsUrl(coverUrl)) {
+    errors.push(`封面链接必须以 https:// 开头：${coverUrl}`);
+  }
+  if (options.requireCover && !coverUrl) {
+    errors.push(options.requireCover);
+  }
+
+  return {
+    kind,
+    title,
+    body: bodyText,
+    htmlContent,
+    markdownContent,
+    digest,
+    coverUrl,
+    mediaUrls,
+    tags,
+    publishMode,
+  };
+}
+
 function buildPlatformOption(platform, rawOption, errors) {
   const raw = asPlainObject(rawOption);
   if (platform === 'bilibili') {
@@ -401,7 +562,7 @@ function buildPlatformOption(platform, rawOption, errors) {
     const workId = cleanOptionText(raw.workId, 200);
     const workLink = cleanOptionText(raw.workLink, 500);
     if (!workId && !workLink) {
-      errors.push('微信视频号需要先通过插件生成作品 ID 或填写作品链接');
+      errors.push('微信视频号当前不是 OpenAPI 一键上传，需要先通过视频号网页/插件生成作品 ID，或填写已发布作品链接');
       return undefined;
     }
     return {
@@ -442,12 +603,8 @@ function buildPlatformOption(platform, rawOption, errors) {
 
 function validatePublishPayload(body) {
   const errors = [];
-  const title = typeof body.title === 'string' ? body.title.trim() : '';
-  const bodyText = typeof body.body === 'string' ? body.body.trim() : '';
-  const mediaUrls = Array.isArray(body.mediaUrls)
-    ? body.mediaUrls.map(value => String(value || '').trim()).filter(Boolean)
-    : [];
-  const coverUrl = typeof body.coverUrl === 'string' ? body.coverUrl.trim() : '';
+  const contentPackage = normalizeContentPackage(body, errors);
+  const { kind, title, body: bodyText, mediaUrls, coverUrl } = contentPackage;
   const mediaMode = body.mediaMode === 'images' ? 'images' : 'video';
   const accountIds = Array.isArray(body.accountIds)
     ? body.accountIds.map(value => String(value || '').trim()).filter(Boolean)
@@ -455,25 +612,8 @@ function validatePublishPayload(body) {
   const accounts = Array.isArray(body.accounts) ? body.accounts : [];
   const platformOptions = asPlainObject(body.platformOptions);
 
-  if (!title && !bodyText) {
-    errors.push('标题和正文至少填写一项');
-  }
   if (accountIds.length === 0) {
     errors.push('至少选择一个已授权账号');
-  }
-  if (mediaUrls.length === 0) {
-    errors.push('请至少上传一个素材或填写一个备用素材链接');
-  }
-  if (mediaMode === 'video' && mediaUrls.length > 1) {
-    errors.push('视频模式一次只提交一个素材');
-  }
-  for (const url of mediaUrls) {
-    if (!isHttpsUrl(url)) {
-      errors.push(`素材链接必须以 https:// 开头：${url}`);
-    }
-  }
-  if (coverUrl && !isHttpsUrl(coverUrl)) {
-    errors.push(`封面链接必须以 https:// 开头：${coverUrl}`);
   }
 
   const accountMap = new Map();
@@ -503,7 +643,11 @@ function validatePublishPayload(body) {
   }
 
   const flowId = `willeai-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-  const type = mediaMode === 'video'
+  const type = kind === 'article'
+    ? 'article'
+    : kind === 'dynamic'
+      ? 'article'
+      : mediaMode === 'video'
     ? 'video'
     : mediaUrls.length === 1 && looksLikeVideoUrl(mediaUrls[0])
       ? 'video'
@@ -529,6 +673,103 @@ function validatePublishPayload(body) {
 
 function looksLikeVideoUrl(value) {
   return /\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(value);
+}
+
+function normalizeHandoffTarget(value) {
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+  if (value && typeof value === 'object') {
+    return String(value.platform || value.name || value.id || '').trim();
+  }
+  return '';
+}
+
+function validateMultiPostHandoffPayload(body) {
+  const errors = [];
+  const rawTargets = Array.isArray(body.targets) ? body.targets : [];
+  const targets = [...new Set(rawTargets.map(normalizeHandoffTarget).filter(Boolean))];
+  const requiresWechatArticleCover = targets.includes('ARTICLE_WEIXIN');
+  const contentPackage = normalizeContentPackage(body, errors, {
+    requireCover: requiresWechatArticleCover ? '微信公众号长文章需要填写封面链接' : '',
+  });
+
+  if (targets.length === 0) {
+    errors.push('请选择至少一个浏览器辅助发布目标');
+  }
+
+  for (const target of targets) {
+    if (contentPackage.kind === 'article' && !target.startsWith('ARTICLE_')) {
+      errors.push(`长文章不能发布到动态目标：${target}`);
+    }
+    if (contentPackage.kind === 'dynamic' && !target.startsWith('DYNAMIC_')) {
+      errors.push(`短动态不能发布到文章目标：${target}`);
+    }
+    if (contentPackage.kind === 'video') {
+      errors.push('视频内容当前不走 MultiPost handoff');
+    }
+  }
+
+  if (errors.length > 0) {
+    throw Object.assign(new Error('浏览器辅助发布预检未通过'), { statusCode: 400, details: errors });
+  }
+
+  const handoffId = `multipost-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+  const syncData = buildMultiPostSyncData(contentPackage, targets);
+
+  return {
+    handoffId,
+    status: 'browser_waiting_confirm',
+    contentPackage: {
+      ...contentPackage,
+      targets,
+    },
+    syncData,
+    targets: targets.map(platform => ({
+      platform,
+      status: 'browser_waiting_confirm',
+    })),
+  };
+}
+
+function buildMultiPostSyncData(contentPackage, targets) {
+  const scheduledPublishTime = Date.now();
+  const platforms = targets.map(name => ({ name }));
+  const isAutoPublish = contentPackage.publishMode === 'auto';
+
+  if (contentPackage.kind === 'article') {
+    return {
+      platforms,
+      isAutoPublish,
+      data: {
+        title: contentPackage.title,
+        digest: contentPackage.digest || contentPackage.body.slice(0, 120),
+        cover: contentPackage.coverUrl ? fileDataFromUrl(contentPackage.coverUrl, 'cover') : null,
+        htmlContent: contentPackage.htmlContent,
+        markdownContent: contentPackage.markdownContent || contentPackage.body,
+        images: contentPackage.mediaUrls.map((url, index) => fileDataFromUrl(url, `image-${index + 1}`)),
+        tags: contentPackage.tags,
+        scheduledPublishTime,
+      },
+    };
+  }
+
+  return {
+    platforms,
+    isAutoPublish,
+    data: {
+      title: contentPackage.title,
+      content: contentPackage.body,
+      images: contentPackage.mediaUrls
+        .filter(url => !looksLikeVideoUrl(url))
+        .map((url, index) => fileDataFromUrl(url, `image-${index + 1}`)),
+      videos: contentPackage.mediaUrls
+        .filter(looksLikeVideoUrl)
+        .map((url, index) => fileDataFromUrl(url, `video-${index + 1}`)),
+      tags: contentPackage.tags,
+      scheduledPublishTime,
+    },
+  };
 }
 
 function validateUploadSignPayload(body) {
@@ -707,6 +948,13 @@ async function handleApi(req, res, url) {
         body: payload,
       });
       ok(res, result.data);
+      return;
+    }
+
+    if (url.pathname === '/api/multipost/handoff' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const payload = validateMultiPostHandoffPayload(body);
+      ok(res, payload);
       return;
     }
 

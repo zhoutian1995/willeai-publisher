@@ -12,8 +12,11 @@
 - 确认资产上传：`POST assets/:assetId/confirm`
 - 创建发布 Flow：`POST v2/channels/publish/flows`
 - 查询发布 Flow：`GET v2/channels/publish/flows/:flowId`
+- 生成 MultiPost 浏览器辅助发布包：`POST /api/multipost/handoff`
 
-内容页支持本地素材上传和备用素材链接两种入口。浏览器先通过本服务获取上传签名，再把文件直传到对象存储，确认成功后把最终链接写入素材队列并参与提交检查。备用链接必须使用 HTTPS。视频模式一次提交 1 个视频素材；图文模式支持多张图片。发布前必须选择至少一个已连接账号。
+内容页支持视频、长文章、短动态三种内容类型。本地素材会先通过本服务获取上传签名，再直传到对象存储，确认成功后把最终链接写入素材队列并参与提交检查。备用链接必须使用 HTTPS。视频一次提交 1 个视频素材；长文章支持正文图片，公众号文章要求封面；短动态支持图片或视频素材。
+
+OpenAPI 已支持的平台会创建直接发布 Flow。微信公众号、知乎等未走 OpenAPI 的文字平台通过 MultiPost 浏览器扩展辅助发布，默认只打开目标平台并填入编辑器，最终发布由用户确认。自动发布只在用户显式选择发布模式为自动时传给扩展。
 
 ## 本地运行
 
@@ -97,6 +100,7 @@ server {
 
 ```bash
 node --check server.js
+node --check public/app.js
 curl http://127.0.0.1:3200/api/health
 ```
 

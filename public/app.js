@@ -8,6 +8,8 @@ const platformNames = new Map([
   ['youtube', 'YouTube'],
   ['tiktok', 'TikTok'],
   ['wxGzh', '微信公众号'],
+  ['zhihu', '知乎'],
+  ['weibo', '微博'],
   ['facebook', 'Facebook'],
   ['instagram', 'Instagram'],
   ['threads', 'Threads'],
@@ -17,6 +19,84 @@ const platformNames = new Map([
 ]);
 
 const selectedAccountsStorageKey = 'willeai.publisher.selectedAccounts.v1';
+const contentKindLabels = new Map([
+  ['video', '视频'],
+  ['article', '长文章'],
+  ['dynamic', '短动态'],
+]);
+const serverContentModes = {
+  text: 'article2',
+  imageText: 'article',
+  video: 'video',
+};
+const browserTargetDefinitions = [
+  {
+    id: 'ARTICLE_WEIXIN',
+    kind: 'article',
+    platform: 'wxGzh',
+    label: '微信公众号',
+    mode: '浏览器辅助发布',
+    help: '创建图文草稿并打开公众号编辑页，首版不默认群发。',
+    requireCover: true,
+  },
+  {
+    id: 'ARTICLE_ZHIHU',
+    kind: 'article',
+    platform: 'zhihu',
+    label: '知乎专栏',
+    mode: '浏览器辅助发布',
+    help: '打开知乎专栏编辑器并填入标题、正文和图片。',
+  },
+  {
+    id: 'DYNAMIC_ZHIHU',
+    kind: 'dynamic',
+    platform: 'zhihu',
+    label: '知乎想法',
+    mode: '浏览器辅助发布',
+    help: '打开知乎并填入想法正文和素材，最终发布由用户确认。',
+  },
+  {
+    id: 'DYNAMIC_WEIXIN',
+    kind: 'dynamic',
+    platform: 'wxGzh',
+    label: '微信公众号动态',
+    mode: '浏览器辅助发布',
+    help: '打开公众号后台并填入动态内容，最终发布由用户确认。',
+  },
+  {
+    id: 'DYNAMIC_REDNOTE',
+    kind: 'dynamic',
+    platform: 'xhs',
+    label: '小红书图文',
+    mode: '浏览器辅助发布',
+    help: '打开小红书创作者发布页并填入图文内容。',
+  },
+  {
+    id: 'DYNAMIC_WEIBO',
+    kind: 'dynamic',
+    platform: 'weibo',
+    label: '微博',
+    mode: '浏览器辅助发布',
+    help: '打开微博编辑器并填入正文和媒体。',
+  },
+  {
+    id: 'DYNAMIC_X',
+    kind: 'dynamic',
+    platform: 'twitter',
+    label: 'X',
+    mode: '浏览器辅助发布',
+    help: '打开 X 编辑器并填入正文和媒体。',
+  },
+  {
+    id: 'DYNAMIC_THREADS',
+    kind: 'dynamic',
+    platform: 'threads',
+    label: 'Threads',
+    mode: '浏览器辅助发布',
+    help: '打开 Threads 编辑器并填入正文和媒体。',
+  },
+];
+const browserTargetNameMap = new Map(browserTargetDefinitions.map(target => [target.id, target.label]));
 
 const state = {
   health: null,
@@ -56,9 +136,13 @@ const state = {
   userActions: new Map(),
   userActionLoading: new Set(),
   mediaItems: [],
+  contentKind: 'video',
   mediaMode: 'video',
+  browserTargetIds: new Set(),
   nextMediaId: 1,
   activeFlowId: '',
+  activeHandoff: null,
+  activeHandoffDelivery: null,
   flowTimer: null,
   accountRefreshTimer: null,
 };
@@ -74,6 +158,10 @@ const els = {
   reloadOptionsButton: document.querySelector('#reloadOptionsButton'),
   titleInput: document.querySelector('#titleInput'),
   bodyInput: document.querySelector('#bodyInput'),
+  digestInput: document.querySelector('#digestInput'),
+  htmlContentInput: document.querySelector('#htmlContentInput'),
+  markdownContentInput: document.querySelector('#markdownContentInput'),
+  articleExtraFields: document.querySelector('#articleExtraFields'),
   mediaInput: document.querySelector('#mediaInput'),
   mediaLabel: document.querySelector('#mediaLabel'),
   mediaHelp: document.querySelector('#mediaHelp'),
@@ -84,10 +172,14 @@ const els = {
   clearMediaButton: document.querySelector('#clearMediaButton'),
   mediaQueue: document.querySelector('#mediaQueue'),
   coverInput: document.querySelector('#coverInput'),
+  tagsInput: document.querySelector('#tagsInput'),
+  publishModeInput: document.querySelector('#publishModeInput'),
   publishAtInput: document.querySelector('#publishAtInput'),
   preflightList: document.querySelector('#preflightList'),
   publishTargetPanel: document.querySelector('#publishTargetPanel'),
   platformOptionsList: document.querySelector('#platformOptionsList'),
+  browserTargetList: document.querySelector('#browserTargetList'),
+  browserTargetCount: document.querySelector('#browserTargetCount'),
   selectedTargetsSummary: document.querySelector('#selectedTargetsSummary'),
   flowBox: document.querySelector('#flowBox'),
   flowMeta: document.querySelector('#flowMeta'),
@@ -124,6 +216,10 @@ function isHttpsUrl(value) {
   catch {
     return false;
   }
+}
+
+function looksLikeVideoUrl(value) {
+  return /\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(String(value || '').trim());
 }
 
 function formatDateTimeLocal(date) {
@@ -181,6 +277,93 @@ async function apiWithRetry(path, options = {}, retryOptions = {}) {
   return null;
 }
 
+function requestMultiPostExtension(action, data, timeoutMs = 4500) {
+  return new Promise((resolve, reject) => {
+    const traceId = `willeai-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+    let timer = 0;
+    const cleanup = () => {
+      window.removeEventListener('message', onMessage);
+      window.clearTimeout(timer);
+    };
+    const onMessage = (event) => {
+      if (event.source !== window || event.data?.type !== 'response' || event.data?.traceId !== traceId) {
+        return;
+      }
+      cleanup();
+      const response = event.data;
+      if (response.code === 0) {
+        resolve(response.data);
+        return;
+      }
+      const error = new Error(response.message || 'MultiPost 扩展请求失败');
+      error.code = response.code;
+      error.data = response.data;
+      reject(error);
+    };
+    window.addEventListener('message', onMessage);
+    timer = window.setTimeout(() => {
+      cleanup();
+      const error = new Error('未检测到 MultiPost 浏览器扩展，请确认扩展已安装并启用。');
+      error.code = 'timeout';
+      reject(error);
+    }, timeoutMs);
+    window.postMessage({
+      type: 'request',
+      traceId,
+      action,
+      data,
+    }, window.location.origin);
+  });
+}
+
+async function ensureMultiPostTrusted() {
+  try {
+    await requestMultiPostExtension('MULTIPOST_EXTENSION_CHECK_SERVICE_STATUS', null, 2500);
+    return { ok: true };
+  }
+  catch (error) {
+    if (error.code !== 403) {
+      return { ok: false, message: error.message };
+    }
+  }
+
+  try {
+    const result = await requestMultiPostExtension('MULTIPOST_EXTENSION_REQUEST_TRUST_DOMAIN', null, 120000);
+    if (result?.trusted) {
+      return { ok: true };
+    }
+    return { ok: false, message: 'MultiPost 扩展尚未信任当前发布站。' };
+  }
+  catch (error) {
+    return { ok: false, message: error.message };
+  }
+}
+
+async function sendHandoffToMultiPost(syncData) {
+  const trusted = await ensureMultiPostTrusted();
+  if (!trusted.ok) {
+    return {
+      status: 'browser_failed',
+      message: trusted.message,
+    };
+  }
+
+  try {
+    const result = await requestMultiPostExtension('MULTIPOST_EXTENSION_PUBLISH', syncData, 8000);
+    return {
+      status: 'browser_waiting_confirm',
+      extensionId: result?.extensionId || '',
+      message: 'MultiPost 扩展已接收内容包，将打开浏览器辅助发布窗口。',
+    };
+  }
+  catch (error) {
+    return {
+      status: 'browser_failed',
+      message: error.message,
+    };
+  }
+}
+
 function authErrorMessage(error) {
   if (error?.transient) {
     return '平台授权服务暂时不可用，已自动重试；请稍后再试。';
@@ -228,7 +411,11 @@ function accountId(account) {
 }
 
 function getSelectedAccounts() {
-  return state.accounts.filter(account => getAccountStatus(account) === 'normal' && state.selectedAccountIds.has(accountId(account)));
+  return state.accounts.filter(account =>
+    getAccountStatus(account) === 'normal'
+    && state.selectedAccountIds.has(accountId(account))
+    && accountSupportsCurrentContentKind(account),
+  );
 }
 
 function getSelectedPlatformIds() {
@@ -238,7 +425,7 @@ function getSelectedPlatformIds() {
 function getAvailableAccounts() {
   const order = new Map(preferredPlatforms.map((platform, index) => [platform, index]));
   return state.accounts
-    .filter(account => getAccountStatus(account) === 'normal' && accountId(account))
+    .filter(account => getAccountStatus(account) === 'normal' && accountId(account) && accountSupportsCurrentContentKind(account))
     .sort((a, b) => {
       const ao = order.has(a.type) ? order.get(a.type) : 100;
       const bo = order.has(b.type) ? order.get(b.type) : 100;
@@ -251,6 +438,78 @@ function getAvailableAccounts() {
       }
       return accountName(a).localeCompare(accountName(b), 'zh-CN');
     });
+}
+
+function getContentKindLabel(kind = state.contentKind) {
+  return contentKindLabels.get(kind) || kind;
+}
+
+function getServerModeForCurrentContent() {
+  if (state.contentKind === 'video') {
+    return serverContentModes.video;
+  }
+  return getMediaUrls().length > 0 ? serverContentModes.imageText : serverContentModes.text;
+}
+
+function platformSupportsMode(platform, mode) {
+  const modes = Array.isArray(platform?.contentLimits?.modes) ? platform.contentLimits.modes : [];
+  return modes.includes(mode);
+}
+
+function platformSupportsCurrentContentKind(platform) {
+  if (platform?.platform === 'wxGzh') {
+    return false;
+  }
+  if (platform?.platform === 'xhs' && state.contentKind !== 'video') {
+    return false;
+  }
+  if (!platformCanPublish(platform)) {
+    return false;
+  }
+  if (state.contentKind === 'video') {
+    return platformSupportsMode(platform, serverContentModes.video);
+  }
+  if (state.contentKind === 'article') {
+    return platformSupportsMode(platform, serverContentModes.text) || platformSupportsMode(platform, serverContentModes.imageText);
+  }
+  return platformSupportsMode(platform, serverContentModes.text) || platformSupportsMode(platform, serverContentModes.imageText);
+}
+
+function accountSupportsCurrentContentKind(account) {
+  return platformSupportsCurrentContentKind(getPlatformDefinition(account.type));
+}
+
+function getSelectedBrowserTargets() {
+  return browserTargetDefinitions.filter(target => target.kind === state.contentKind && state.browserTargetIds.has(target.id));
+}
+
+function parseTagsInput() {
+  return [...new Set(els.tagsInput.value
+    .split(/[\s,，、#]+/)
+    .map(item => item.trim())
+    .filter(Boolean))]
+    .slice(0, 30);
+}
+
+function pruneSelectionsForContentKind() {
+  let changed = false;
+  for (const id of [...state.selectedAccountIds]) {
+    const account = state.accounts.find(item => accountId(item) === id);
+    if (!account || !accountSupportsCurrentContentKind(account)) {
+      state.selectedAccountIds.delete(id);
+      changed = true;
+    }
+  }
+  for (const id of [...state.browserTargetIds]) {
+    const target = browserTargetDefinitions.find(item => item.id === id);
+    if (!target || target.kind !== state.contentKind) {
+      state.browserTargetIds.delete(id);
+    }
+  }
+  if (changed && state.selectionHistoryExists) {
+    persistSelectedAccountIds();
+    state.selectionNotice = '部分已选账号不支持当前内容类型，已自动忽略。';
+  }
 }
 
 function getSelectedPlatformNames() {
@@ -322,6 +581,10 @@ function setSelectedAccount(targetAccountId, isSelected) {
     showToast('该账号当前不可用，请重新连接后再选择。', 'warn');
     return;
   }
+  if (!accountSupportsCurrentContentKind(account)) {
+    showToast(`该账号不支持${getContentKindLabel()}直接发布。`, 'warn');
+    return;
+  }
   if (isSelected) {
     state.selectedAccountIds.add(normalizedAccountId);
   }
@@ -334,8 +597,10 @@ function setSelectedAccount(targetAccountId, isSelected) {
 }
 
 function renderSelectionSurfaces() {
+  pruneSelectionsForContentKind();
   renderPlatformGrid();
   renderPublishTargetPanel();
+  renderBrowserTargetList();
   renderSelectedTargetsSummary();
   renderPlatformOptions();
   maybeLoadSelectedPlatformOptions();
@@ -456,7 +721,7 @@ function renderAvatar(account) {
 
 function renderPlatformGrid() {
   const platforms = sortPlatforms(state.platforms);
-  const normalCount = state.accounts.filter(account => getAccountStatus(account) === 'normal').length;
+  const normalCount = state.accounts.filter(account => getAccountStatus(account) === 'normal' && accountSupportsCurrentContentKind(account)).length;
   els.accountCount.textContent = `${normalCount} 个可用账号`;
 
   if (platforms.length === 0) {
@@ -477,6 +742,7 @@ function renderPlatformGrid() {
         : '未连接';
     const canAuth = platformCanAuth(platform);
     const canPublish = platformCanPublish(platform);
+    const supportsCurrentKind = platformSupportsCurrentContentKind(platform);
 
     return `
       <article class="platform-row${isSelected ? ' is-selected' : ''}" data-platform="${escapeHtml(platform.platform)}">
@@ -489,6 +755,7 @@ function renderPlatformGrid() {
           <div class="platform-actions">
             ${renderConnectAction(platform, accounts)}
             ${canPublish ? '<span class="mini-pill is-ok">支持发布</span>' : '<span class="mini-pill is-warn">发布能力待确认</span>'}
+            ${supportsCurrentKind ? `<span class="mini-pill is-ok">支持${escapeHtml(getContentKindLabel())}</span>` : `<span class="mini-pill is-warn">不支持${escapeHtml(getContentKindLabel())}</span>`}
             ${canAuth ? '<span class="mini-pill is-ok">支持连接</span>' : '<span class="mini-pill is-warn">不可在此连接</span>'}
           </div>
           ${renderAccountList(platform, connected, abnormal)}
@@ -501,7 +768,11 @@ function renderPlatformGrid() {
 
 function renderAccountList(platform, connected, abnormalCount) {
   const platformId = platform.platform;
-  if (connected.length === 0) {
+  const publishableConnected = connected.filter(accountSupportsCurrentContentKind);
+  if (publishableConnected.length === 0) {
+    if (connected.length > 0 && !platformSupportsCurrentContentKind(platform)) {
+      return `<p class="account-note">已连接账号暂不支持${escapeHtml(getContentKindLabel())}直接发布，可在内容页选择浏览器辅助发布。</p>`;
+    }
     if (!platformCanAuth(platform)) {
       return `<p class="account-note">${escapeHtml(authUnavailableText(platform))}</p>`;
     }
@@ -510,7 +781,7 @@ function renderAccountList(platform, connected, abnormalCount) {
 
   return `
     <div class="account-list">
-      ${connected.map(account => renderAccountChoice(account, { platformId, compact: true })).join('')}
+      ${publishableConnected.map(account => renderAccountChoice(account, { platformId, compact: true })).join('')}
     </div>
   `;
 }
@@ -545,18 +816,20 @@ function renderPublishTargetPanel() {
   const summaryText = selectedAccounts.length > 0
     ? `已选择 ${selectedAccounts.length} 个账号：${selectedPlatforms.join(' / ')}`
     : availableAccounts.length > 0
-      ? '请选择本次要发布到的账号。系统会记住这次选择。'
-      : '还没有可用账号，请先连接或重新授权。';
+      ? `请选择本次要直接发布${getContentKindLabel()}的账号。系统会记住这次选择。`
+      : state.contentKind === 'video'
+        ? '还没有可用视频发布账号，请先连接或重新授权。'
+        : '当前没有支持该文字类型的 OpenAPI 账号，可选择浏览器辅助发布。';
 
   if (availableAccounts.length === 0) {
     els.publishTargetPanel.innerHTML = `
       <section class="publish-target-panel" tabindex="-1" aria-labelledby="publishTargetTitle">
         <div class="publish-target-head">
           <div>
-            <span id="publishTargetTitle" class="field-title">发布目标</span>
+            <span id="publishTargetTitle" class="field-title">直接发布目标</span>
             <p>${escapeHtml(summaryText)}</p>
           </div>
-          <button class="small-button" type="button" data-view-target="accounts">去连接账号</button>
+          ${state.contentKind === 'video' ? '<button class="small-button" type="button" data-view-target="accounts">去连接账号</button>' : '<span class="mini-pill is-warn">无直接目标</span>'}
         </div>
       </section>
     `;
@@ -567,7 +840,7 @@ function renderPublishTargetPanel() {
     <section class="publish-target-panel" tabindex="-1" aria-labelledby="publishTargetTitle">
       <div class="publish-target-head">
         <div>
-          <span id="publishTargetTitle" class="field-title">发布目标</span>
+          <span id="publishTargetTitle" class="field-title">直接发布目标</span>
           <p>${escapeHtml(summaryText)}</p>
           ${state.selectionNotice ? `<p class="target-warning">${escapeHtml(state.selectionNotice)}</p>` : ''}
         </div>
@@ -583,6 +856,60 @@ function renderPublishTargetPanel() {
       ` : ''}
     </section>
   `;
+}
+
+function renderBrowserTargetList() {
+  if (!els.browserTargetList) {
+    return;
+  }
+
+  const targets = browserTargetDefinitions.filter(target => target.kind === state.contentKind);
+  const selectedTargets = getSelectedBrowserTargets();
+  if (els.browserTargetCount) {
+    els.browserTargetCount.textContent = selectedTargets.length > 0 ? `已选 ${selectedTargets.length}` : '未选择';
+    els.browserTargetCount.className = `mini-pill ${selectedTargets.length > 0 ? 'is-ok' : 'is-warn'}`;
+  }
+
+  if (state.contentKind === 'video') {
+    els.browserTargetList.innerHTML = '<p class="option-empty">视频发布继续使用 OpenAPI 任务流。</p>';
+    return;
+  }
+
+  if (targets.length === 0) {
+    els.browserTargetList.innerHTML = '<p class="option-empty">当前内容类型没有浏览器辅助平台。</p>';
+    return;
+  }
+
+  els.browserTargetList.innerHTML = targets.map((target) => {
+    const checked = state.browserTargetIds.has(target.id);
+    return `
+      <label class="browser-target-option${checked ? ' is-selected' : ''}">
+        <input type="checkbox" data-action="select-browser-target" value="${escapeHtml(target.id)}" ${checked ? 'checked' : ''} />
+        <span class="browser-target-copy">
+          <span class="target-account-top">
+            <strong>${escapeHtml(target.label)}</strong>
+            <span class="mini-pill is-warn">${escapeHtml(target.mode)}</span>
+          </span>
+          <span>${escapeHtml(target.help)}</span>
+        </span>
+      </label>
+    `;
+  }).join('');
+}
+
+function setBrowserTarget(targetId, isSelected) {
+  const target = browserTargetDefinitions.find(item => item.id === targetId);
+  if (!target || target.kind !== state.contentKind) {
+    showToast('该浏览器辅助目标不适用于当前内容类型。', 'warn');
+    return;
+  }
+  if (isSelected) {
+    state.browserTargetIds.add(targetId);
+  }
+  else {
+    state.browserTargetIds.delete(targetId);
+  }
+  renderSelectionSurfaces();
 }
 
 function renderPublishTargetOption(account) {
@@ -610,10 +937,15 @@ function renderSelectedTargetsSummary() {
     return;
   }
   const names = getSelectedPlatformNames();
-  els.selectedTargetsSummary.textContent = names.length > 0
-    ? `将发布到：${names.join(' / ')}`
-    : '将发布到：请选择发布目标';
-  els.selectedTargetsSummary.classList.toggle('is-ready', names.length > 0);
+  const browserNames = getSelectedBrowserTargets().map(target => target.label);
+  const parts = [
+    ...(names.length > 0 ? [`直接发布：${names.join(' / ')}`] : []),
+    ...(browserNames.length > 0 ? [`浏览器辅助：${browserNames.join(' / ')}`] : []),
+  ];
+  els.selectedTargetsSummary.textContent = parts.length > 0
+    ? parts.join('；')
+    : '请选择发布目标';
+  els.selectedTargetsSummary.classList.toggle('is-ready', parts.length > 0);
 }
 
 function renderAuthSession(platformId) {
@@ -718,7 +1050,7 @@ function renderPlatformOptions() {
       return renderKwaiOptions();
     }
     if (platformId === 'wxSph') {
-      return renderWorkLinkOptions('wxSph', '微信视频号', '填写插件返回的作品 ID 或作品链接后，可把该作品纳入任务流。');
+      return renderWorkLinkOptions('wxSph', '微信视频号', '视频号当前不是 OpenAPI 一键上传：请先通过视频号网页/插件生成作品 ID，或粘贴已发布作品链接。');
     }
     if (platformId === 'xhs') {
       return renderWorkLinkOptions('xhs', '小红书', '上游当前要求提供已完成的小红书作品链接，暂不支持从这里直接上传发布。');
@@ -895,6 +1227,21 @@ function getMediaUrls() {
   return [...new Set([...uploadedUrls, ...manualUrls])];
 }
 
+function getContentPackage(preflight) {
+  return {
+    kind: state.contentKind,
+    title: els.titleInput.value.trim(),
+    body: els.bodyInput.value.trim(),
+    htmlContent: els.htmlContentInput?.value.trim() || '',
+    markdownContent: els.markdownContentInput?.value.trim() || '',
+    digest: els.digestInput?.value.trim() || '',
+    coverUrl: els.coverInput.value.trim(),
+    mediaUrls: preflight?.mediaUrls || getMediaUrls(),
+    tags: parseTagsInput(),
+    publishMode: els.publishModeInput.value === 'auto' ? 'auto' : 'draft',
+  };
+}
+
 function formatFileSize(bytes) {
   const size = Number(bytes || 0);
   if (size < 1024) {
@@ -944,11 +1291,14 @@ function validateFilesForMode(files) {
     return [file];
   }
 
-  const imageFiles = list.filter(file => getMediaKind(file) === 'image');
-  if (imageFiles.length !== list.length) {
-    showToast('图文模式只接受图片文件，已忽略其它文件。', 'warn');
+  const allowedFiles = list.filter((file) => {
+    const kind = getMediaKind(file);
+    return state.contentKind === 'dynamic' ? ['image', 'video'].includes(kind) : kind === 'image';
+  });
+  if (allowedFiles.length !== list.length) {
+    showToast(state.contentKind === 'dynamic' ? '短动态只接受图片或视频文件，已忽略其它文件。' : '当前模式只接受图片文件，已忽略其它文件。', 'warn');
   }
-  return imageFiles;
+  return allowedFiles;
 }
 
 function renderMediaQueue() {
@@ -994,19 +1344,30 @@ function renderMediaQueue() {
 }
 
 function updateMediaModeUi() {
-  const isVideo = state.mediaMode === 'video';
-  els.mediaLabel.textContent = isVideo ? '视频素材' : '图文素材';
+  const isVideo = state.contentKind === 'video';
+  const isDynamic = state.contentKind === 'dynamic';
+  state.mediaMode = isVideo ? 'video' : 'images';
+  els.mediaLabel.textContent = isVideo ? '视频素材' : isDynamic ? '动态素材' : '正文图片';
   els.mediaHelp.textContent = isVideo
     ? '拖入本地视频或选择文件，上传成功后自动加入队列。'
-    : '拖入本地图片或选择文件，上传成功后自动加入队列。';
+    : isDynamic
+      ? '短动态可上传图片或视频，浏览器辅助平台会尽量填入。'
+      : '可上传正文图片。公众号长文章封面请填写封面链接。';
   els.dropZoneHint.textContent = isVideo
     ? '视频模式一次只接受 1 个视频文件。'
-    : '图文模式支持一次选择多张图片。';
-  els.fileInput.accept = isVideo ? 'video/*' : 'image/*';
+    : isDynamic
+      ? '短动态支持图片或视频素材。'
+      : '长文章支持一次选择多张正文图片。';
+  els.fileInput.accept = isVideo ? 'video/*' : isDynamic ? 'image/*,video/*' : 'image/*';
   els.fileInput.multiple = !isVideo;
   els.mediaInput.placeholder = isVideo
     ? '每行粘贴一个公开视频链接，必须以 https:// 开头'
-    : '每行粘贴一个公开图片链接，必须以 https:// 开头';
+    : isDynamic
+      ? '每行粘贴一个公开图片或视频链接，必须以 https:// 开头'
+      : '每行粘贴一个公开图片链接，必须以 https:// 开头';
+  if (els.articleExtraFields) {
+    els.articleExtraFields.hidden = state.contentKind !== 'article';
+  }
 }
 
 function addMediaFiles(fileList) {
@@ -1136,6 +1497,7 @@ function clearMediaItems() {
 function buildPreflight() {
   const selectedAccounts = getSelectedAccounts();
   const selectedPlatforms = new Set(selectedAccounts.map(account => account.type));
+  const selectedBrowserTargets = getSelectedBrowserTargets();
   const mediaUrls = getMediaUrls();
   const title = els.titleInput.value.trim();
   const body = els.bodyInput.value.trim();
@@ -1144,40 +1506,72 @@ function buildPreflight() {
   const failedCount = state.mediaItems.filter(item => item.status === 'error').length;
   const uploadedItems = state.mediaItems.filter(item => item.status === 'success');
   const issues = [];
+  const hasDirectTargets = selectedAccounts.length > 0;
+  const hasBrowserTargets = selectedBrowserTargets.length > 0;
+  const hasTargets = hasDirectTargets || hasBrowserTargets;
+  const hasTextContent = title.length > 0 || body.length > 0;
+  const articleBodyReady = body.length > 0 || (els.htmlContentInput?.value.trim() || '').length > 0 || (els.markdownContentInput?.value.trim() || '').length > 0;
+  const uploadedTypesOk = uploadedItems.every((item) => {
+    if (state.contentKind === 'video') {
+      return item.kind === 'video';
+    }
+    if (state.contentKind === 'article') {
+      return item.kind === 'image';
+    }
+    return ['image', 'video'].includes(item.kind);
+  });
+  const articleMediaUrlsOk = state.contentKind !== 'article' || mediaUrls.every(url => !looksLikeVideoUrl(url));
 
   const checks = [
     {
-      ok: selectedAccounts.length > 0,
-      text: selectedAccounts.length > 0 ? `已选择 ${selectedAccounts.length} 个目标` : '请选择发布目标',
-      action: selectedAccounts.length > 0 ? '' : 'target',
+      ok: hasTargets,
+      text: hasTargets
+        ? `已选择 ${selectedAccounts.length} 个直接目标、${selectedBrowserTargets.length} 个浏览器辅助目标`
+        : '请选择发布目标',
+      action: hasTargets ? '' : 'target',
     },
     {
-      ok: title.length > 0 || body.length > 0,
-      text: title.length > 0 || body.length > 0 ? '标题或正文已填写' : '标题和正文至少填写一项',
-    },
-    {
-      ok: mediaUrls.length > 0,
-      text: mediaUrls.length > 0 ? `已有 ${mediaUrls.length} 个可用素材链接` : '还没有可用素材',
+      ok: state.contentKind === 'article' ? title.length > 0 && articleBodyReady : state.contentKind === 'dynamic' ? body.length > 0 : hasTextContent,
+      text: state.contentKind === 'article'
+        ? title.length > 0 && articleBodyReady ? '长文章标题和正文已填写' : '长文章需要标题和正文'
+        : state.contentKind === 'dynamic'
+          ? body.length > 0 ? '短动态正文已填写' : '短动态需要正文'
+          : hasTextContent ? '标题或正文已填写' : '标题和正文至少填写一项',
     },
     {
       ok: uploadingCount === 0,
       text: uploadingCount === 0 ? '没有等待上传的文件' : `等待 ${uploadingCount} 个素材上传完成`,
     },
     {
-      ok: state.mediaMode !== 'video' || mediaUrls.length <= 1,
-      text: state.mediaMode !== 'video' || mediaUrls.length <= 1 ? '素材数量符合当前模式' : '视频模式只保留 1 个素材',
+      ok: state.contentKind !== 'video' || mediaUrls.length > 0,
+      text: state.contentKind !== 'video' || mediaUrls.length > 0 ? `已有 ${mediaUrls.length} 个可用素材链接` : '视频发布需要 1 个视频素材',
     },
     {
-      ok: uploadedItems.every(item => state.mediaMode === 'video' ? item.kind === 'video' : item.kind === 'image'),
-      text: uploadedItems.every(item => state.mediaMode === 'video' ? item.kind === 'video' : item.kind === 'image')
+      ok: state.contentKind !== 'video' || mediaUrls.length <= 1,
+      text: state.contentKind !== 'video' || mediaUrls.length <= 1 ? '素材数量符合当前模式' : '视频模式只保留 1 个素材',
+    },
+    {
+      ok: uploadedTypesOk,
+      text: uploadedTypesOk
         ? '上传素材类型符合当前模式'
-        : state.mediaMode === 'video'
+        : state.contentKind === 'video'
           ? '视频模式只允许视频文件'
-          : '图文模式只允许图片文件',
+          : state.contentKind === 'article'
+            ? '长文章正文素材只允许图片文件'
+            : '短动态只允许图片或视频文件',
+    },
+    {
+      ok: articleMediaUrlsOk,
+      text: articleMediaUrlsOk ? '正文素材链接符合当前内容类型' : '长文章正文素材只允许图片链接',
     },
     {
       ok: mediaUrls.every(isHttpsUrl) && (!cover || isHttpsUrl(cover)),
       text: '素材和封面链接必须以 https:// 开头',
+    },
+    {
+      ok: hasDirectTargets || state.contentKind !== 'video',
+      text: hasDirectTargets || state.contentKind !== 'video' ? '直接发布目标已就绪' : '视频发布需要选择 OpenAPI 账号',
+      action: hasDirectTargets || state.contentKind !== 'video' ? '' : 'target',
     },
   ];
 
@@ -1214,15 +1608,16 @@ function buildPreflight() {
   if (selectedPlatforms.has('wxSph')) {
     const wxOption = state.platformOptions.wxSph;
     if (!wxOption.workId.trim() && !wxOption.workLink.trim()) {
+      const message = '微信视频号当前不是 OpenAPI 一键上传，需要先填写插件作品 ID 或已发布作品链接';
       checks.push({
         ok: false,
-        text: '微信视频号需要先填写插件作品 ID 或作品链接',
+        text: message,
       });
-      issues.push('微信视频号需要先填写插件作品 ID 或作品链接');
+      issues.push(message);
     }
   }
 
-  if (selectedPlatforms.has('xhs') && !state.platformOptions.xhs.workLink.trim()) {
+  if (state.contentKind === 'video' && selectedPlatforms.has('xhs') && !state.platformOptions.xhs.workLink.trim()) {
     checks.push({
       ok: false,
       text: '小红书当前需要填写已完成作品链接',
@@ -1238,6 +1633,30 @@ function buildPreflight() {
     });
   }
 
+  const needsWechatCover = selectedBrowserTargets.some(target => target.id === 'ARTICLE_WEIXIN');
+  if (needsWechatCover && !cover) {
+    checks.push({
+      ok: false,
+      text: '微信公众号长文章需要填写封面链接',
+    });
+    issues.push('微信公众号长文章需要填写封面链接');
+  }
+
+  if (hasDirectTargets) {
+    checks.push({
+      ok: true,
+      text: 'OpenAPI 可发布平台将创建直接发布任务',
+    });
+  }
+
+  if (hasBrowserTargets) {
+    checks.push({
+      ok: true,
+      warn: true,
+      text: `浏览器辅助将打开 ${selectedBrowserTargets.length} 个平台，默认需要人工确认`,
+    });
+  }
+
   els.preflightList.innerHTML = checks.map(check => `
     <div class="check-row ${check.ok ? 'is-ok' : check.warn ? 'is-warn' : ''}">
       <span class="check-icon">${check.ok ? '✓' : check.warn ? '!' : '×'}</span>
@@ -1247,26 +1666,33 @@ function buildPreflight() {
   `).join('');
 
   renderSelectedTargetsSummary();
-  updateOverview({ issues, selectedAccounts, mediaUrls });
-  return { issues, selectedAccounts, mediaUrls };
+  updateOverview({ issues, selectedAccounts, selectedBrowserTargets, mediaUrls });
+  return { issues, selectedAccounts, selectedBrowserTargets, mediaUrls };
 }
 
 function updateOverview(preflight) {
   const selectedAccounts = preflight?.selectedAccounts
-    || state.accounts.filter(account => state.selectedAccountIds.has(accountId(account)));
+    || getSelectedAccounts();
+  const selectedBrowserTargets = preflight?.selectedBrowserTargets || getSelectedBrowserTargets();
   const mediaUrls = preflight?.mediaUrls || getMediaUrls();
-  const normalCount = state.accounts.filter(account => getAccountStatus(account) === 'normal').length;
-  const hasContent = els.titleInput.value.trim().length > 0 || els.bodyInput.value.trim().length > 0;
-  const hasAccounts = selectedAccounts.length > 0;
-  const hasMedia = mediaUrls.length > 0;
+  const normalCount = state.accounts.filter(account => getAccountStatus(account) === 'normal' && accountSupportsCurrentContentKind(account)).length;
+  const title = els.titleInput.value.trim();
+  const body = els.bodyInput.value.trim();
+  const hasContent = state.contentKind === 'article'
+    ? title.length > 0 && (body.length > 0 || (els.htmlContentInput?.value.trim() || '').length > 0 || (els.markdownContentInput?.value.trim() || '').length > 0)
+    : state.contentKind === 'dynamic'
+      ? body.length > 0
+      : title.length > 0 || body.length > 0;
+  const hasTargets = selectedAccounts.length > 0 || selectedBrowserTargets.length > 0;
+  const hasMedia = state.contentKind === 'video' ? mediaUrls.length > 0 : true;
   const issues = Array.isArray(preflight?.issues) ? preflight.issues : [];
-  const isReady = issues.length === 0 && hasAccounts && hasContent && hasMedia;
+  const isReady = issues.length === 0 && hasTargets && hasContent && hasMedia;
 
   if (els.connectedMetric) {
     els.connectedMetric.textContent = String(normalCount);
   }
   if (els.selectedMetric) {
-    els.selectedMetric.textContent = String(selectedAccounts.length);
+    els.selectedMetric.textContent = String(selectedAccounts.length + selectedBrowserTargets.length);
   }
   if (els.mediaMetric) {
     els.mediaMetric.textContent = String(mediaUrls.length);
@@ -1278,17 +1704,28 @@ function updateOverview(preflight) {
     els.preflightMetric.closest('.metric-tile')?.classList.toggle('is-danger', false);
   }
 
-  updateOverviewSignals({ hasAccounts, hasContent, hasMedia, isReady, normalCount, selectedCount: selectedAccounts.length, mediaCount: mediaUrls.length });
+  updateOverviewSignals({
+    hasAccounts: hasTargets,
+    hasDirectTargets: selectedAccounts.length > 0,
+    hasBrowserTargets: selectedBrowserTargets.length > 0,
+    hasContent,
+    hasMedia,
+    isReady,
+    normalCount,
+    selectedCount: selectedAccounts.length + selectedBrowserTargets.length,
+    mediaCount: mediaUrls.length,
+  });
 }
 
 function updateOverviewSignals(summary) {
   const activeFlow = Boolean(state.activeFlowId);
+  const activeHandoff = Boolean(state.activeHandoff);
   const next = !summary.hasAccounts
     ? {
-      title: summary.normalCount > 0 ? '选择发布目标' : '先连接目标',
-      text: summary.normalCount > 0 ? '在内容页勾选本次要同步的平台账号。' : '先连接至少一个可用平台账号。',
-      view: summary.normalCount > 0 ? 'compose' : 'accounts',
-      focusTarget: summary.normalCount > 0 ? 'publish-target' : '',
+      title: summary.normalCount > 0 || state.contentKind !== 'video' ? '选择发布目标' : '先连接目标',
+      text: summary.normalCount > 0 || state.contentKind !== 'video' ? '在内容页勾选本次要发布的平台目标。' : '先连接至少一个可用平台账号。',
+      view: summary.normalCount > 0 || state.contentKind !== 'video' ? 'compose' : 'accounts',
+      focusTarget: summary.normalCount > 0 || state.contentKind !== 'video' ? 'publish-target' : '',
     }
     : !summary.hasContent
       ? {
@@ -1308,7 +1745,7 @@ function updateOverviewSignals(summary) {
             text: '打开检查页，按提示修正提交前问题。',
             view: 'publish',
           }
-          : activeFlow
+          : activeFlow || activeHandoff
             ? {
               title: '查看任务结果',
               text: '任务已经提交，继续观察各平台返回状态。',
@@ -1348,8 +1785,8 @@ function updateOverviewSignals(summary) {
     els.mediaSignal.classList.toggle('is-ok', summary.hasMedia);
   }
   if (els.submitSignal) {
-    els.submitSignal.textContent = activeFlow ? '任务已提交' : summary.isReady ? '等待提交' : '尚未提交任务';
-    els.submitSignal.classList.toggle('is-ok', activeFlow);
+    els.submitSignal.textContent = activeFlow || activeHandoff ? '任务已提交' : summary.isReady ? '等待提交' : '尚未提交任务';
+    els.submitSignal.classList.toggle('is-ok', activeFlow || activeHandoff);
   }
 }
 
@@ -1387,26 +1824,82 @@ function goToPublishTarget() {
 function renderFlow(flow) {
   if (!flow || !flow.flowId) {
     state.activeFlowId = '';
-    els.flowMeta.textContent = '未提交';
-    els.flowBox.innerHTML = '<p class="empty-state">选择目标并准备素材后，任务结果会显示在这里。</p>';
+    if (!state.activeHandoff) {
+      els.flowMeta.textContent = '未提交';
+    }
+    renderResultBlocks(null, state.activeHandoff, state.activeHandoffDelivery);
     updateOverview();
     return;
   }
 
   state.activeFlowId = flow.flowId;
-  els.flowMeta.textContent = '已提交';
+  renderResultBlocks(flow, state.activeHandoff, state.activeHandoffDelivery);
+  loadUserActionsForTasks(Array.isArray(flow.tasks) ? flow.tasks : []);
+  updateOverview();
+}
+
+function renderResultBlocks(flow, handoff, handoffDelivery) {
+  const hasFlow = Boolean(flow?.flowId);
+  const hasHandoff = Boolean(handoff?.handoffId);
+  if (!hasFlow && !hasHandoff) {
+    els.flowMeta.textContent = '未提交';
+    els.flowBox.innerHTML = '<p class="empty-state">选择目标并准备内容后，任务结果会显示在这里。</p>';
+    return;
+  }
+
+  els.flowMeta.textContent = hasFlow && hasHandoff
+    ? '直接发布 + 浏览器辅助'
+    : hasFlow
+      ? '直接发布已提交'
+      : '浏览器辅助待确认';
+  els.flowBox.innerHTML = [
+    hasFlow ? renderFlowBlock(flow) : '',
+    hasHandoff ? renderHandoffBlock(handoff, handoffDelivery) : '',
+  ].filter(Boolean).join('');
+}
+
+function renderFlowBlock(flow) {
   const tasks = Array.isArray(flow.tasks) ? flow.tasks : [];
-  els.flowBox.innerHTML = `
+  return `
     <div class="flow-summary">
-      <strong>任务已创建</strong>
+      <strong>直接发布任务已创建</strong>
+      <span class="mini-pill is-ok">server_published</span>
       <div class="flow-id">${escapeHtml(flow.flowId)}</div>
     </div>
     <div class="task-list">
       ${tasks.length > 0 ? tasks.map(renderTask).join('') : '<p class="empty-state">上游暂未返回任务列表。</p>'}
     </div>
   `;
-  loadUserActionsForTasks(tasks);
-  updateOverview();
+}
+
+function renderHandoffBlock(handoff, handoffDelivery) {
+  const deliveryStatus = handoffDelivery?.status || handoff.status || 'browser_waiting_confirm';
+  const isFailed = deliveryStatus === 'browser_failed';
+  const targetRows = Array.isArray(handoff.targets) ? handoff.targets : [];
+  const payloadText = JSON.stringify(handoff.syncData || {}, null, 2);
+  return `
+    <div class="flow-summary handoff-summary">
+      <strong>浏览器辅助发布</strong>
+      <span class="mini-pill is-${isFailed ? 'danger' : 'warn'}">${escapeHtml(deliveryStatus)}</span>
+      <div class="flow-id">${escapeHtml(handoff.handoffId)}</div>
+      <p class="handoff-note">${escapeHtml(handoffDelivery?.message || '已生成 MultiPost 内容包，扩展会打开目标平台并填入内容。')}</p>
+      <div class="handoff-actions">
+        <button class="handoff-button" type="button" data-action="copy-handoff">复制 handoff 数据</button>
+      </div>
+      <textarea class="handoff-payload" readonly aria-label="MultiPost handoff JSON">${escapeHtml(payloadText)}</textarea>
+    </div>
+    <div class="task-list">
+      ${targetRows.map(target => `
+        <article class="task-row">
+          <div class="task-top">
+            <span class="task-title">${escapeHtml(browserTargetNameMap.get(target.platform) || platformNames.get(target.platform) || target.platform)}</span>
+            <span class="mini-pill is-${isFailed ? 'danger' : 'warn'}">${escapeHtml(isFailed ? '浏览器辅助失败' : '等待用户确认')}</span>
+          </div>
+          <p class="task-detail">${escapeHtml(isFailed ? '请确认 MultiPost 扩展已安装、启用并信任当前域名。' : '扩展将打开平台编辑页，默认不会点击最终发布按钮。')}</p>
+        </article>
+      `).join('')}
+    </div>
+  `;
 }
 
 function renderTask(task) {
@@ -1774,26 +2267,57 @@ async function submitPublish(event) {
 
   els.publishButton.disabled = true;
   try {
-    const payload = {
-      title: els.titleInput.value,
-      body: els.bodyInput.value,
-      mediaUrls: preflight.mediaUrls,
-      mediaMode: state.mediaMode,
-      coverUrl: els.coverInput.value,
-      publishAt: els.publishAtInput.value ? new Date(els.publishAtInput.value).toISOString() : new Date().toISOString(),
-      accountIds: preflight.selectedAccounts.map(accountId),
-      accounts: state.accounts,
-      platformOptions: state.platformOptions,
-    };
-    const flow = await api('/api/publish', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-    state.activeFlowId = flow.flowId;
-    renderFlow(flow);
+    clearInterval(state.flowTimer);
+    state.activeFlowId = '';
+    state.activeHandoff = null;
+    state.activeHandoffDelivery = null;
+    const contentPackage = getContentPackage(preflight);
+    const publishAt = els.publishAtInput.value ? new Date(els.publishAtInput.value).toISOString() : new Date().toISOString();
+    let flow = null;
+    let handoff = null;
+
+    if (preflight.selectedAccounts.length > 0) {
+      const payload = {
+        ...contentPackage,
+        mediaMode: state.mediaMode,
+        publishAt,
+        accountIds: preflight.selectedAccounts.map(accountId),
+        accounts: state.accounts,
+        platformOptions: state.platformOptions,
+      };
+      flow = await api('/api/publish', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      state.activeFlowId = flow.flowId;
+      startFlowPolling(flow.flowId);
+    }
+
+    if (preflight.selectedBrowserTargets.length > 0) {
+      handoff = await api('/api/multipost/handoff', {
+        method: 'POST',
+        body: JSON.stringify({
+          ...contentPackage,
+          targets: preflight.selectedBrowserTargets.map(target => target.id),
+        }),
+      });
+      state.activeHandoff = handoff;
+      state.activeHandoffDelivery = {
+        status: 'browser_waiting_confirm',
+        message: '正在发送给 MultiPost 扩展。',
+      };
+      renderResultBlocks(flow, state.activeHandoff, state.activeHandoffDelivery);
+      state.activeHandoffDelivery = await sendHandoffToMultiPost(handoff.syncData);
+    }
+
+    renderResultBlocks(flow, state.activeHandoff, state.activeHandoffDelivery);
     setActiveView('publish');
-    showToast('发布任务已提交。');
-    startFlowPolling(flow.flowId);
+    const message = flow && handoff
+      ? '直接发布任务已提交，浏览器辅助内容包已生成。'
+      : flow
+        ? '直接发布任务已提交。'
+        : '浏览器辅助内容包已生成。';
+    showToast(message);
   }
   catch (error) {
     const details = Array.isArray(error.details) ? `：${error.details[0]}` : '';
@@ -1833,10 +2357,17 @@ function startFlowPolling(flowId) {
 function clearForm() {
   els.titleInput.value = '';
   els.bodyInput.value = '';
+  els.digestInput.value = '';
+  els.htmlContentInput.value = '';
+  els.markdownContentInput.value = '';
   clearMediaItems();
   els.coverInput.value = '';
+  els.tagsInput.value = '';
+  els.publishModeInput.value = 'draft';
   state.userActions.clear();
   state.userActionLoading.clear();
+  state.activeHandoff = null;
+  state.activeHandoffDelivery = null;
   setDefaultPublishTime();
   renderSelectionSurfaces();
   renderFlow(null);
@@ -1916,6 +2447,17 @@ function bindEvents() {
       setSelectedAccount(actionTarget.dataset.accountId, true);
       return;
     }
+    if (actionTarget?.dataset.action === 'copy-handoff') {
+      const payload = state.activeHandoff?.syncData ? JSON.stringify(state.activeHandoff.syncData, null, 2) : '';
+      if (!payload) {
+        showToast('没有可复制的 handoff 数据。', 'warn');
+        return;
+      }
+      window.navigator.clipboard?.writeText(payload)
+        .then(() => showToast('已复制 handoff 数据。'))
+        .catch(() => showToast('浏览器不允许写入剪贴板，请手动复制文本框内容。', 'warn'));
+      return;
+    }
 
     const viewTarget = event.target.closest('[data-view-target]');
     if (!viewTarget || [...els.viewTriggers].includes(viewTarget)) {
@@ -1928,15 +2470,28 @@ function bindEvents() {
     setActiveView(viewTarget.dataset.viewTarget);
   });
 
-  for (const input of [els.titleInput, els.bodyInput, els.mediaInput, els.coverInput, els.publishAtInput]) {
+  for (const input of [
+    els.titleInput,
+    els.bodyInput,
+    els.digestInput,
+    els.htmlContentInput,
+    els.markdownContentInput,
+    els.mediaInput,
+    els.coverInput,
+    els.tagsInput,
+    els.publishModeInput,
+    els.publishAtInput,
+  ]) {
     input.addEventListener('input', buildPreflight);
+    input.addEventListener('change', buildPreflight);
   }
 
-  document.querySelectorAll('[data-media-mode]').forEach((button) => {
+  document.querySelectorAll('[data-content-kind]').forEach((button) => {
     button.addEventListener('click', () => {
-      state.mediaMode = button.dataset.mediaMode;
-      document.querySelectorAll('[data-media-mode]').forEach(item => item.classList.toggle('is-active', item === button));
+      state.contentKind = button.dataset.contentKind;
+      document.querySelectorAll('[data-content-kind]').forEach(item => item.classList.toggle('is-active', item === button));
       updateMediaModeUi();
+      renderSelectionSurfaces();
       buildPreflight();
     });
   });
@@ -1973,6 +2528,14 @@ function bindEvents() {
       return;
     }
     setSelectedAccount(target.value, target.checked);
+  });
+
+  els.browserTargetList?.addEventListener('change', (event) => {
+    const target = event.target;
+    if (target.dataset.action !== 'select-browser-target') {
+      return;
+    }
+    setBrowserTarget(target.value, target.checked);
   });
 
   els.platformOptionsList.addEventListener('change', (event) => {

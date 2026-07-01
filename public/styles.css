@@ -33,6 +33,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 html {
   min-width: 320px;
   scroll-behavior: smooth;
@@ -330,7 +334,8 @@ p {
 .dark-ghost-button:active,
 .connect-button:active,
 .small-button:active,
-.media-action:active {
+.media-action:active,
+.handoff-button:active {
   transform: translateY(1px);
 }
 
@@ -901,6 +906,56 @@ h2 {
   background: rgba(255, 255, 255, 0.86);
   padding: 9px;
   transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+
+.browser-target-list,
+.article-extra-fields {
+  display: grid;
+  gap: 10px;
+}
+
+.browser-target-option {
+  min-width: 0;
+  min-height: 72px;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  border: 1px solid rgba(189, 203, 201, 0.82);
+  border-radius: var(--radius-control);
+  background: rgba(255, 255, 255, 0.86);
+  padding: 11px;
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+
+.browser-target-option:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-raised);
+}
+
+.browser-target-option.is-selected {
+  border-color: rgba(11, 127, 122, 0.62);
+  background: var(--accent-quiet);
+  box-shadow: inset 3px 0 0 rgba(11, 127, 122, 0.82);
+}
+
+.browser-target-option input {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  accent-color: var(--accent);
+}
+
+.browser-target-copy {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.browser-target-copy > span:not(.target-account-top) {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .publish-target-option:hover {
@@ -1744,12 +1799,40 @@ button:focus-visible {
   padding: 6px 10px;
   font-size: 12px;
   font-weight: 800;
+  cursor: pointer;
 }
 
 .handoff-link {
   margin-top: 6px;
   color: var(--accent-dark);
   overflow-wrap: anywhere;
+}
+
+.handoff-summary {
+  display: grid;
+  gap: 8px;
+}
+
+.handoff-summary > strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.handoff-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.handoff-payload {
+  min-height: 168px;
+  max-height: 280px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  resize: vertical;
 }
 
 .toast-region {

@@ -6,7 +6,7 @@
     <title>WilleAI Publish Studio</title>
     <meta name="description" content="WilleAI 跨平台内容发布工作台" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=20260701-targets1" />
+    <link rel="stylesheet" href="/styles.css?v=20260701-text1" />
   </head>
   <body>
     <a class="skip-link" href="#overviewTitle">跳到工作区</a>
@@ -112,11 +112,12 @@
                 <div>
                   <p class="section-kicker">内容</p>
                   <h2 id="editorTitle">素材与正文</h2>
-                  <p>在同一工作区完成正文、素材和排期，减少来回切换。</p>
+                  <p>选择内容类型后填写对应字段，视频继续走 OpenAPI，文字内容可交给浏览器辅助。</p>
                 </div>
-                <div class="segmented" role="group" aria-label="素材类型">
-                  <button type="button" class="segment is-active" data-media-mode="video">视频</button>
-                  <button type="button" class="segment" data-media-mode="images">图文</button>
+                <div class="segmented" role="group" aria-label="内容类型">
+                  <button type="button" class="segment is-active" data-content-kind="video">视频</button>
+                  <button type="button" class="segment" data-content-kind="article">长文章</button>
+                  <button type="button" class="segment" data-content-kind="dynamic">短动态</button>
                 </div>
               </div>
 
@@ -130,6 +131,20 @@
                   <span>正文</span>
                   <textarea id="bodyInput" rows="8" placeholder="填写正文、话题、说明。平台限制会在预检区提示。"></textarea>
                 </label>
+                <div class="article-extra-fields" id="articleExtraFields" hidden>
+                  <label class="field">
+                    <span>摘要</span>
+                    <textarea id="digestInput" rows="3" maxlength="500" placeholder="用于公众号、知乎等文章摘要，选填"></textarea>
+                  </label>
+                  <label class="field">
+                    <span>HTML 正文</span>
+                    <textarea id="htmlContentInput" rows="6" placeholder="选填。留空时会按纯文本正文生成基础段落 HTML。"></textarea>
+                  </label>
+                  <label class="field">
+                    <span>Markdown 正文</span>
+                    <textarea id="markdownContentInput" rows="6" placeholder="选填。留空时使用正文文本。"></textarea>
+                  </label>
+                </div>
                 <section class="media-workspace" aria-labelledby="mediaLabel">
                   <div class="media-workspace-head">
                     <div>
@@ -160,11 +175,24 @@
                 <div class="inline-fields">
                   <label class="field">
                     <span>封面链接</span>
-                    <input id="coverInput" type="url" placeholder="选填，必须以 https:// 开头" />
+                    <input id="coverInput" type="url" placeholder="选填，公众号长文章必填，必须以 https:// 开头" />
                   </label>
                   <label class="field">
                     <span>发布时间</span>
                     <input id="publishAtInput" type="datetime-local" />
+                  </label>
+                </div>
+                <div class="inline-fields">
+                  <label class="field">
+                    <span>标签</span>
+                    <input id="tagsInput" type="text" placeholder="用逗号或空格分隔，例如 AI, 创业, 产品" />
+                  </label>
+                  <label class="field">
+                    <span>发布模式</span>
+                    <select id="publishModeInput">
+                      <option value="draft">生成草稿，发布前由我确认</option>
+                      <option value="auto">自动发布，仅用于已验证平台</option>
+                    </select>
                   </label>
                 </div>
 
@@ -181,6 +209,20 @@
                     <p class="option-empty">选择账号后显示对应平台配置。</p>
                   </div>
                 </section>
+
+                <section class="platform-options-panel browser-targets-panel" aria-labelledby="browserTargetsTitle">
+                  <div class="platform-options-head">
+                    <div>
+                      <span id="browserTargetsTitle" class="field-title">浏览器辅助发布</span>
+                      <p>公众号、知乎等未走 OpenAPI 的平台会打开目标编辑器并填入内容。</p>
+                    </div>
+                    <span class="mini-pill is-warn" id="browserTargetCount">未选择</span>
+                  </div>
+
+                  <div class="browser-target-list" id="browserTargetList">
+                    <p class="option-empty">长文章或短动态会显示可选辅助平台。</p>
+                  </div>
+                </section>
               </div>
             </section>
 
@@ -188,7 +230,7 @@
               <div class="aside-box">
                 <p class="section-kicker">提交前</p>
                 <h2>交付检查</h2>
-                <p>必填项通过后可直接提交；也可以先打开检查页查看阻塞项。</p>
+                <p>必填项通过后可提交。文字内容会拆分为直接发布和浏览器辅助两类任务。</p>
                 <p class="selected-targets-summary" id="selectedTargetsSummary">将发布到：请选择发布目标</p>
                 <div class="action-row vertical-actions">
                   <button class="primary-button" id="publishButton" type="submit">
@@ -196,7 +238,7 @@
                       <path d="m22 2-7 20-4-9-9-4Z" />
                       <path d="M22 2 11 13" />
                     </svg>
-                    提交发布
+                    提交
                   </button>
                   <button class="secondary-button" type="button" data-view-target="publish">查看检查</button>
                   <button class="secondary-button" id="clearButton" type="button">
@@ -247,6 +289,6 @@
     </div>
 
     <div class="toast-region" id="toastRegion" aria-live="polite"></div>
-    <script src="/app.js?v=20260701-targets1" type="module"></script>
+    <script src="/app.js?v=20260701-text1" type="module"></script>
   </body>
 </html>
