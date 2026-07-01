@@ -492,6 +492,21 @@ function parseTagsInput() {
     .slice(0, 30);
 }
 
+function parseHashtags(value) {
+  const tags = [];
+  for (const match of String(value || '').matchAll(/#([\w\p{Script=Han}]+)/gu)) {
+    const tag = match[1]?.trim();
+    if (tag && !tags.includes(tag)) {
+      tags.push(tag);
+    }
+  }
+  return tags;
+}
+
+function getDraftTopics(body = els.bodyInput.value) {
+  return [...new Set([...parseTagsInput(), ...parseHashtags(body)])];
+}
+
 function pruneSelectionsForContentKind() {
   let changed = false;
   for (const id of [...state.selectedAccountIds]) {
@@ -1503,6 +1518,7 @@ function buildPreflight() {
   const title = els.titleInput.value.trim();
   const body = els.bodyInput.value.trim();
   const cover = els.coverInput.value.trim();
+  const topics = getDraftTopics(body);
   const uploadingCount = state.mediaItems.filter(item => ['uploading', 'confirming'].includes(item.status)).length;
   const failedCount = state.mediaItems.filter(item => item.status === 'error').length;
   const uploadedItems = state.mediaItems.filter(item => item.status === 'success');
@@ -1596,6 +1612,14 @@ function buildPreflight() {
       text: 'Bilibili 需要选择发布分区',
     });
     issues.push('Bilibili 需要选择发布分区');
+  }
+
+  if (selectedPlatforms.has('bilibili') && topics.length === 0) {
+    checks.push({
+      ok: false,
+      text: 'Bilibili 需要至少填写 1 个标签，或在正文里加入 #话题',
+    });
+    issues.push('Bilibili 需要至少填写 1 个标签，或在正文里加入 #话题');
   }
 
   if (selectedPlatforms.has('bilibili') && state.platformOptions.bilibili.copyright === '2' && !state.platformOptions.bilibili.source.trim()) {
@@ -2342,6 +2366,12 @@ function formatErrorDetails(details) {
     return `：${details}`;
   }
   if (typeof details === 'object') {
+    if (details.data) {
+      const nested = formatErrorDetails(details.data);
+      if (nested) {
+        return nested;
+      }
+    }
     if (Array.isArray(details.issues) && details.issues.length > 0) {
       return `：${formatErrorDetailItem(details.issues[0])}`;
     }

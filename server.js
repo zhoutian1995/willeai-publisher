@@ -483,6 +483,39 @@ function cleanStringArray(value, maxItems = 30, maxLength = 100) {
     .slice(0, maxItems);
 }
 
+function parseHashtags(value) {
+  const text = String(value || '');
+  const tags = [];
+  for (const match of text.matchAll(/#([\w\p{Script=Han}]+)/gu)) {
+    const tag = match[1]?.trim();
+    if (tag && !tags.includes(tag)) {
+      tags.push(tag);
+    }
+  }
+  return tags;
+}
+
+function appendTagsAsHashtags(bodyText, tags) {
+  const existing = new Set(parseHashtags(bodyText));
+  const missingTags = tags
+    .map(tag => String(tag || '').replace(/^#+/, '').trim())
+    .filter(Boolean)
+    .filter((tag) => {
+      if (existing.has(tag)) {
+        return false;
+      }
+      existing.add(tag);
+      return true;
+    });
+
+  if (missingTags.length === 0) {
+    return bodyText;
+  }
+
+  const suffix = missingTags.map(tag => `#${tag}`).join(' ');
+  return [bodyText, suffix].filter(Boolean).join(bodyText ? '\n' : '');
+}
+
 function normalizeContentKind(value, fallback = 'video') {
   return ['video', 'article', 'dynamic'].includes(value) ? value : fallback;
 }
@@ -565,14 +598,14 @@ function normalizeContentPackage(body, errors, options = {}) {
   const fallbackKind = body.mediaMode === 'images' ? 'legacy_images' : 'video';
   const kind = normalizeContentKind(body.kind, fallbackKind);
   const title = cleanOptionText(body.title, 300);
-  const bodyText = cleanOptionText(body.body, 200000);
+  const tags = cleanStringArray(body.tags, 30, 50);
+  const bodyText = cleanOptionText(appendTagsAsHashtags(body.body, tags), 200000);
   const digest = cleanOptionText(body.digest, 500);
   const rawHtmlContent = cleanOptionText(body.htmlContent, 500000);
   const markdownContent = cleanOptionText(body.markdownContent, 500000) || bodyText;
   const htmlContent = rawHtmlContent || simpleHtmlFromText(markdownContent || bodyText);
   const coverUrl = cleanOptionText(body.coverUrl, 1000);
   const mediaUrls = normalizeMediaUrls(body.mediaUrls);
-  const tags = cleanStringArray(body.tags, 30, 50);
   const publishMode = normalizePublishMode(body.publishMode);
 
   if (kind === 'video') {
